@@ -1,0 +1,35 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Node / Vue
+web/node_modules/
+web/dist/
+web/.vite/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets / config
+config.toml
+!config.toml.example
+
+# Logs
+*.log
+
+# Export artifacts
+logistics-workflow-exports/
+
+# Hermes plan files (local dev plans)
+.hermes/plan-*.md
+
+# Backup files
+*.bak
+*.orig

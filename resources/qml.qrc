@@ -1,0 +1,14 @@
+<RCC>
+    <qresource prefix="/">
+        <file alias="MainWindow.qml">../qml/MainWindow.qml</file>
+        <file alias="CalendarPopup.qml">../qml/CalendarPopup.qml</file>
+        <file alias="DashboardTab.qml">../qml/DashboardTab.qml</file>
+        <file alias="ShipmentSidebar.qml">../qml/ShipmentSidebar.qml</file>
+        <file alias="WorkflowProgress.qml">../qml/WorkflowProgress.qml</file>
+        <file alias="Step1Create.qml">../qml/Step1Create.qml</file>
+        <file alias="Step2Draft.qml">../qml/Step2Draft.qml</file>
+        <file alias="Step3Customs.qml">../qml/Step3Customs.qml</file>
+        <file alias="Step4Checklist.qml">../qml/Step4Checklist.qml</file>
+        <file alias="Theme.qml">../qml/Theme.qml</file>
+    </qresource>
+</RCC>

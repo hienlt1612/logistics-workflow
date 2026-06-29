@@ -1,0 +1,8 @@
+# Logistics Workflow — Database Configuration
+# Copy this file to config.toml and edit with your PostgreSQL credentials
+
+host = "127.0.0.1"
+port = 5432
+db_name = "logistics_workflow"
+user = "mim_dev"
+password = "your_password_here"

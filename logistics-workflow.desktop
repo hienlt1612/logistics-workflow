@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Logistics Workflow
+Comment=Export/Shipping Document Workflow Management
+Exec=/home/mim/logistics-workflow/run.sh
+Path=/home/mim/logistics-workflow
+Terminal=false
+Type=Application
+Categories=Office;ProjectManagement;
+StartupNotify=true

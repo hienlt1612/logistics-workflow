@@ -1,0 +1,2 @@
+singleton AppData 1.0 AppData.qml
+singleton Theme 1.0 Theme.qml
