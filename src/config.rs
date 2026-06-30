@@ -83,4 +83,49 @@ mod tests {
             "postgres://mim_dev:test123@127.0.0.1:5432/logistics_workflow"
         );
     }
+
+    #[test]
+    fn test_env_var_overrides() {
+        // Set env vars to override default config values
+        std::env::set_var("LW_DB_HOST", "override-host");
+        std::env::set_var("LW_DB_PORT", "9999");
+        std::env::set_var("LW_DB_NAME", "override_db");
+        std::env::set_var("LW_DB_USER", "override_user");
+        std::env::set_var("LW_DB_PASSWORD", "override_pass");
+
+        // Create a minimal config file with defaults so load() reads it first
+        // then applies overrides from env vars.
+        // Since config.toml exists in the project root, load() will read it,
+        // then apply our env var overrides.
+        let config = Config::load().expect("load config with env overrides");
+
+        assert_eq!(config.host, "override-host");
+        assert_eq!(config.port, 9999);
+        assert_eq!(config.db_name, "override_db");
+        assert_eq!(config.user, "override_user");
+        assert_eq!(config.password, "override_pass");
+
+        // Clean up env vars
+        std::env::remove_var("LW_DB_HOST");
+        std::env::remove_var("LW_DB_PORT");
+        std::env::remove_var("LW_DB_NAME");
+        std::env::remove_var("LW_DB_USER");
+        std::env::remove_var("LW_DB_PASSWORD");
+    }
+
+    #[test]
+    fn test_api_token_from_env() {
+        std::env::set_var("LW_API_TOKEN", "my-secret-token");
+
+        // Load config — api_token should be picked up from env
+        let config = Config::load().expect("load config with api token");
+        assert_eq!(config.api_token, Some("my-secret-token".to_string()));
+
+        // Test empty string yields None
+        std::env::set_var("LW_API_TOKEN", "");
+        let config2 = Config::load().expect("load config with empty api token");
+        assert_eq!(config2.api_token, None);
+
+        std::env::remove_var("LW_API_TOKEN");
+    }
 }
