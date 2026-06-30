@@ -9,12 +9,6 @@ defineProps<{
 function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString();
 }
-
-function fmtVal(v: string | null): string {
-  if (!v) return '—';
-  const n = parseFloat(v);
-  return isNaN(n) ? v : `$${n.toLocaleString()}`;
-}
 </script>
 
 <template>
@@ -25,8 +19,10 @@ function fmtVal(v: string | null): string {
           <th>Ref</th>
           <th>Buyer</th>
           <th>Status</th>
-          <th>Shipping Line</th>
-          <th>Value</th>
+          <th>Booking #</th>
+          <th>ETD</th>
+          <th>Invoice #</th>
+          <th>Loading Plan</th>
           <th>Updated</th>
         </tr>
       </thead>
@@ -35,12 +31,14 @@ function fmtVal(v: string | null): string {
           <td class="mono">{{ s.shipment_ref }}</td>
           <td>{{ s.buyer_name ?? '—' }}</td>
           <td><StatusBadge :label="s.status" size="sm" /></td>
-          <td>{{ s.shipping_line ?? '—' }}</td>
-          <td class="num">{{ fmtVal(s.total_value_usd) }}</td>
+          <td>{{ s.booking_number ?? '—' }}</td>
+          <td>{{ s.etd ?? '—' }}</td>
+          <td>{{ s.invoice_number ?? '—' }}</td>
+          <td>{{ s.loading_plan ?? '—' }}</td>
           <td class="date">{{ fmtDate(s.updated_at) }}</td>
         </tr>
         <tr v-if="!shipments.length">
-          <td colspan="6" class="empty">No shipments yet</td>
+          <td colspan="8" class="empty">No shipments yet</td>
         </tr>
       </tbody>
     </table>
@@ -80,11 +78,6 @@ tbody tr:hover {
 .mono {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
-}
-
-.num {
-  text-align: right;
-  font-family: var(--font-mono);
 }
 
 .date {
