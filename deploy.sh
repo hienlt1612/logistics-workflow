@@ -102,8 +102,8 @@ cmd_build_web() {
 cmd_start() {
     check_deps
     if [ ! -f .env ]; then
-        warn ".env not found — copying .env.production as default"
-        cp .env.production .env
+        warn ".env not found — copying env.example as template"
+        cp env.example .env
         warn "Edit .env with your production secrets, then re-run."
         exit 1
     fi
