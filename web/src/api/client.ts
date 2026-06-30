@@ -3,13 +3,23 @@
 const BASE = 'http://127.0.0.1:19876';
 
 // ── Auth ──
-// Read API token from localStorage (set by user via devtools or env). Falls back to env var.
+// Read API token from localStorage (set by auth store after login). Falls back to env var.
 function getToken(): string | null {
   return localStorage.getItem('LW_API_TOKEN') || null;
 }
+function getRole(): string {
+  const auth = localStorage.getItem('LW_AUTH');
+  if (auth) {
+    try { return JSON.parse(auth).role || 'user'; } catch { return 'user'; }
+  }
+  return 'user';
+}
 function authHeader(): Record<string, string> {
   const token = getToken();
-  return token ? { 'Authorization': `Bearer ${token}` } : {};
+  const headers: Record<string, string> = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  headers['X-User-Role'] = getRole();
+  return headers;
 }
 
 export interface Shipment {

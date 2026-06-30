@@ -2,9 +2,11 @@
 import { ref, watch, computed } from 'vue';
 import type { Shipment } from '@/api/client';
 import { useShipmentsStore } from '@/stores/shipments';
+import { useAuthStore } from '@/stores/auth';
 import * as api from '@/api/client';
 
 const store = useShipmentsStore();
+const auth = useAuthStore();
 
 interface BoolField {
   key: keyof Shipment;
@@ -71,6 +73,19 @@ const showTelexConfirm = ref(false);
 async function confirmTelex() {
   await store.toggleChecklistField('telex_released', true);
   showTelexConfirm.value = false;
+}
+
+async function handleTelexToggle() {
+  if (!store.selected) return;
+  if (store.selected.telex_released) {
+    // Admin can revert telex release
+    if (!auth.isAdmin) return;
+    if (!confirm('Revert Telex Release? This will allow modifications to this shipment again.')) return;
+    await store.toggleChecklistField('telex_released', false);
+  } else {
+    // Show confirmation before releasing
+    showTelexConfirm.value = true;
+  }
 }
 
 async function savePayments() {
@@ -183,7 +198,11 @@ async function saveOriginals() {
     <section class="check-section telex-section">
       <h3 class="section-title" style="color: var(--color-telex)">TELEX RELEASE</h3>
       <label class="bool-item telex-item" style="--accent: var(--color-telex)">
-        <input type="checkbox" :checked="store.selected.telex_released" @change="showTelexConfirm = true" :disabled="store.selected.telex_released" />
+        <input type="checkbox"
+          :checked="store.selected.telex_released"
+          @change="handleTelexToggle"
+          :disabled="store.selected.telex_released && !auth.isAdmin"
+        />
         <span :class="{ done: store.selected.telex_released }">{{ store.selected.telex_released ? '✓ Telex Released' : 'Release Telex' }}</span>
       </label>
       <p v-if="store.selected.telex_released" class="telex-done">This shipment has been telex released. No further changes.</p>

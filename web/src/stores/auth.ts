@@ -11,6 +11,7 @@ export const useAuthStore = defineStore('auth', () => {
   const user = ref<AuthUser | null>(null);
 
   const isLoggedIn = computed(() => user.value !== null);
+  const isAdmin = computed(() => user.value?.role === 'admin');
   const role = computed(() => user.value?.role ?? '');
 
   function loadFromStorage() {
@@ -47,5 +48,5 @@ export const useAuthStore = defineStore('auth', () => {
   // Init from localStorage on store creation
   loadFromStorage();
 
-  return { user, isLoggedIn, role, login, logout, loadFromStorage };
+  return { user, isLoggedIn, isAdmin, role, login, logout, loadFromStorage };
 });

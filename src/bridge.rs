@@ -21,7 +21,7 @@ fn check_auth(method: &str, raw: &str) -> Result<(), String> {
     match required {
         None | Some("") => Ok(()), // auth disabled or empty token
         Some(token) => {
-            // Extract Authorization: Bearer <token> from headers
+            // Extract Authorization: Bearer *** from headers
             let auth_header = raw.lines()
                 .find(|l| l.to_lowercase().starts_with("authorization:"))
                 .unwrap_or("");
@@ -34,10 +34,23 @@ fn check_auth(method: &str, raw: &str) -> Result<(), String> {
             if provided == token {
                 Ok(())
             } else {
-                Err(format!("Invalid or missing API token. Use Authorization: Bearer <token> header for write operations."))
+                Err(format!("Invalid or missing API token. Use Authorization: Bearer *** header for write operations."))
             }
         }
     }
+}
+
+/// Extract user role from X-User-Role header. Returns "user" if not found.
+fn extract_role(raw: &str) -> String {
+    raw.lines()
+        .find(|l| l.to_lowercase().starts_with("x-user-role:"))
+        .and_then(|l| l.split_once(':').map(|(_, v)| v.trim().to_string()))
+        .unwrap_or_else(|| "user".into())
+}
+
+/// Check if the request is from an admin user.
+fn is_admin(raw: &str) -> bool {
+    extract_role(raw).eq_ignore_ascii_case("admin")
 }
 
 /// Regenerate the AppData.qml singleton with fresh shipment data.
@@ -436,7 +449,7 @@ async fn route_request(raw: &str) -> (&'static str, &'static str, String) {
     if method == "DELETE" && path.starts_with("/api/shipments/") {
         let id_str = &path["/api/shipments/".len()..];
         if let Ok(id) = id_str.parse::<i64>() {
-            return handle_delete_shipment(pool, id).await;
+            return handle_delete_shipment(pool, id, raw).await;
         }
         return ("400 Bad Request", "application/json", json_error("BAD_REQUEST", "Invalid shipment ID"));
     }
@@ -445,7 +458,7 @@ async fn route_request(raw: &str) -> (&'static str, &'static str, String) {
     if method == "PATCH" && path.starts_with("/api/shipments/") {
         let id_str = &path["/api/shipments/".len()..];
         if let Ok(id) = id_str.parse::<i64>() {
-            return handle_update_shipment(pool, id, &body).await;
+            return handle_update_shipment(pool, id, &body, raw).await;
         }
         return ("400 Bad Request", "application/json", json_error("BAD_REQUEST", "Invalid shipment ID"));
     }
@@ -595,11 +608,32 @@ async fn handle_create_shipment(pool: &sqlx::PgPool, body: &str) -> (&'static st
     }
 }
 
-async fn handle_update_shipment(pool: &sqlx::PgPool, id: i64, body: &str) -> (&'static str, &'static str, String) {
+async fn handle_update_shipment(pool: &sqlx::PgPool, id: i64, body: &str, raw: &str) -> (&'static str, &'static str, String) {
     let fields: serde_json::Map<String, serde_json::Value> = match serde_json::from_str(body) {
         Ok(v) => v,
         Err(e) => return ("400 Bad Request", "application/json", json_error("VALIDATION_ERROR", &format!("Invalid JSON: {e}"))),
     };
+
+    // Check: reverting from TELEX_RELEASED requires admin
+    if let Some(new_status) = fields.get("status").and_then(|v| v.as_str()) {
+        if new_status != "TELEX_RELEASED" {
+            // User is trying to change status away from TELEX_RELEASED
+            // Fetch current shipment to check its current status
+            match db::queries::get_shipment(pool, id).await {
+                Ok(Some(current)) => {
+                    if current.status == "TELEX_RELEASED" && !is_admin(raw) {
+                        return ("403 Forbidden", "application/json",
+                            json_error("FORBIDDEN", "Only admin can revert a TELEX_RELEASED shipment"));
+                    }
+                }
+                Ok(None) => return ("404 Not Found", "application/json",
+                    json_error("NOT_FOUND", &format!("Shipment {id} not found"))),
+                Err(e) => return ("500 Internal Server Error", "application/json",
+                    json_error("DB_ERROR", &e.to_string())),
+            }
+        }
+    }
+
     match db::queries::update_shipment_fields(pool, id, &fields).await {
         Ok(s) => {
             let json = serde_json::to_string(&s).unwrap_or_default();
@@ -642,7 +676,11 @@ async fn handle_toggle_checklist(pool: &sqlx::PgPool, id: i64, body: &str) -> (&
     }
 }
 
-async fn handle_delete_shipment(pool: &sqlx::PgPool, id: i64) -> (&'static str, &'static str, String) {
+async fn handle_delete_shipment(pool: &sqlx::PgPool, id: i64, raw: &str) -> (&'static str, &'static str, String) {
+    // Only admin can delete shipments
+    if !is_admin(raw) {
+        return ("403 Forbidden", "application/json", json_error("FORBIDDEN", "Only admin can delete shipments"));
+    }
     match db::queries::delete_shipment(pool, id).await {
         Ok(true) => {
             regenerate_appdata_inline(pool).await;

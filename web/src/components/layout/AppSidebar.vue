@@ -2,9 +2,11 @@
 import { computed, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useShipmentsStore } from '@/stores/shipments';
+import { useAuthStore } from '@/stores/auth';
 import StatusBadge from '@/components/shared/StatusBadge.vue';
 
 const store = useShipmentsStore();
+const auth = useAuthStore();
 const router = useRouter();
 const search = ref('');
 const statusFilter = ref('');
@@ -172,6 +174,7 @@ async function handleBatchApply() {
           >{{ s.shipment_ref }}</a>
           <StatusBadge :label="s.status" size="sm" />
           <button
+            v-if="auth.isAdmin"
             class="btn-delete"
             title="Delete shipment"
             @click.stop="handleDelete(s.id, s.shipment_ref)"
