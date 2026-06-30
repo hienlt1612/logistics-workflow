@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { useRouter, useRoute } from 'vue-router';
 import { downloadExcel } from '@/api/client';
+import { useAuthStore } from '@/stores/auth';
 import { ref } from 'vue';
 
 const router = useRouter();
 const route = useRoute();
+const auth = useAuthStore();
 const exporting = ref(false);
 
 const links = [
@@ -27,6 +29,11 @@ async function handleExport() {
   } finally {
     exporting.value = false;
   }
+}
+
+function handleLogout() {
+  auth.logout();
+  router.push('/login');
 }
 </script>
 
@@ -52,6 +59,9 @@ async function handleExport() {
 
     <button class="export-btn" :disabled="exporting" @click="handleExport">
       {{ exporting ? 'Exporting...' : '📥 Export Excel' }}
+    </button>
+    <button class="logout-btn" @click="handleLogout">
+      🚪 Logout
     </button>
   </header>
 </template>
@@ -115,4 +125,17 @@ async function handleExport() {
 }
 .export-btn:hover { opacity: 0.9; }
 .export-btn:disabled { opacity: 0.5; }
+
+.logout-btn {
+  background: var(--color-admin);
+  color: var(--text-inverse);
+  border: none;
+  padding: var(--space-xs) var(--space-md);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+.logout-btn:hover { opacity: 0.8; }
 </style>

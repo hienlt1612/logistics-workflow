@@ -4,8 +4,10 @@ import { RouterView } from 'vue-router';
 import AppLayout from '@/components/layout/AppLayout.vue';
 import Toast from '@/components/shared/Toast.vue';
 import { useShipmentsStore } from '@/stores/shipments';
+import { useAuthStore } from '@/stores/auth';
 
 const ship = useShipmentsStore();
+const auth = useAuthStore();
 const toastRef = ref<InstanceType<typeof Toast> | null>(null);
 
 watch(
@@ -20,8 +22,9 @@ watch(
 </script>
 
 <template>
-  <AppLayout>
+  <AppLayout v-if="auth.isLoggedIn">
     <RouterView />
   </AppLayout>
+  <RouterView v-else />
   <Toast ref="toastRef" />
 </template>
