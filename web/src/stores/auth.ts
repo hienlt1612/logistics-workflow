@@ -33,12 +33,15 @@ export const useAuthStore = defineStore('auth', () => {
     const data = await res.json();
     user.value = { username: data.username, role: data.role, token: data.token };
     localStorage.setItem('LW_AUTH', JSON.stringify(user.value));
+    // Store the real API token for write operations (returned by backend login)
+    localStorage.setItem('LW_API_TOKEN', data.token);
     return null; // success
   }
 
   function logout() {
     user.value = null;
     localStorage.removeItem('LW_AUTH');
+    localStorage.removeItem('LW_API_TOKEN');
   }
 
   // Init from localStorage on store creation

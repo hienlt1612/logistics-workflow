@@ -502,8 +502,12 @@ async fn handle_login(pool: &sqlx::PgPool, body: &str) -> (&'static str, &'stati
 
     match db::queries::authenticate_user(pool, &input.username, &input.password).await {
         Ok(Some(user)) => {
+            // Return the real API token from config — client stores it for write auth
+            let api_token = API_TOKEN.get()
+                .and_then(|t| t.as_deref().map(|s| s.to_string()))
+                .unwrap_or_default();
             let resp = serde_json::json!({
-                "token": "lw-session-",  // simple static token since passwords are plain-text
+                "token": api_token,
                 "username": user.username,
                 "role": user.role,
             });
