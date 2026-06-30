@@ -1,9 +1,12 @@
 import { createRouter, createWebHistory } from 'vue-router';
+import { useAuthStore } from '@/stores/auth';
 import DashboardView from '@/views/DashboardView.vue';
+import LoginView from '@/views/LoginView.vue';
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
+    { path: '/login', name: 'login', component: LoginView, meta: { public: true } },
     { path: '/', name: 'dashboard', component: DashboardView },
     {
       path: '/workflow',
@@ -26,6 +29,17 @@ const router = createRouter({
       component: () => import('@/views/ExportView.vue'),
     },
   ],
+});
+
+// Auth guard: redirect to /login if not authenticated
+router.beforeEach((to, _from, next) => {
+  // Initialize auth store inside the guard to avoid import-order issues
+  const auth = useAuthStore();
+  if (to.meta.public || auth.isLoggedIn) {
+    next();
+  } else {
+    next('/login');
+  }
 });
 
 export default router;

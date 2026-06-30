@@ -12,6 +12,9 @@ fn main() {
     // Load config
     let cfg = logistics_workflow::config::Config::load().expect("Failed to load config.toml");
 
+    // Set API token for write-protection
+    logistics_workflow::bridge::set_api_token(cfg.api_token.clone());
+
     // Init tokio runtime + database
     let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
     rt.block_on(async {

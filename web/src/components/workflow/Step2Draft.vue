@@ -40,11 +40,12 @@ watch(
 );
 
 function validate(): boolean {
-  if (!form.value.shipper_name.trim()) { store.lastToast = { text: 'Shipper is required', type: 'error' }; return false; }
-  if (!form.value.consignee_name.trim()) { store.lastToast = { text: 'Consignee is required', type: 'error' }; return false; }
-  if (!form.value.etd) { store.lastToast = { text: 'ETD is required', type: 'error' }; return false; }
-  if (!form.value.invoice_number.trim()) { store.lastToast = { text: 'Invoice Number is required', type: 'error' }; return false; }
-  if (!form.value.total_value_usd.trim()) { store.lastToast = { text: 'Total Value is required', type: 'error' }; return false; }
+  const t = (v: unknown) => String(v ?? '').trim();
+  if (!t(form.value.shipper_name)) { store.lastToast = { text: 'Shipper is required', type: 'error' }; return false; }
+  if (!t(form.value.consignee_name)) { store.lastToast = { text: 'Consignee is required', type: 'error' }; return false; }
+  if (!t(form.value.etd)) { store.lastToast = { text: 'ETD is required', type: 'error' }; return false; }
+  if (!t(form.value.invoice_number)) { store.lastToast = { text: 'Invoice Number is required', type: 'error' }; return false; }
+  if (!t(form.value.total_value_usd)) { store.lastToast = { text: 'Total Value is required', type: 'error' }; return false; }
   return true;
 }
 

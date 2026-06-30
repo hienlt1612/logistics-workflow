@@ -46,6 +46,14 @@ pub struct Shipment {
     pub payment_received: bool,
 }
 
+#[derive(Debug, Deserialize, Serialize, sqlx::FromRow)]
+pub struct User {
+    pub id: i32,
+    pub username: String,
+    pub password: String,
+    pub role: String,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CreateShipmentInput {
     pub sc_po_id: Option<String>,
@@ -232,6 +240,15 @@ pub async fn delete_shipment(pool: &PgPool, id: i64) -> Result<bool, sqlx::Error
         .execute(pool)
         .await?;
     Ok(result.rows_affected() > 0)
+}
+
+/// Authenticate user by username + plain-text password. Returns User on success.
+pub async fn authenticate_user(pool: &PgPool, username: &str, password: &str) -> Result<Option<User>, sqlx::Error> {
+    sqlx::query_as::<_, User>("SELECT id, username, password, role FROM users WHERE username = $1 AND password = $2")
+        .bind(username)
+        .bind(password)
+        .fetch_optional(pool)
+        .await
 }
 
 pub async fn set_checklist_bool(pool: &PgPool, id: i64, field: &str, value: bool) -> Result<Shipment, sqlx::Error> {

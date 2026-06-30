@@ -1,6 +1,44 @@
 use crate::db;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::OnceLock;
+
+/// Global API token for write-protection (set at startup from config).
+static API_TOKEN: OnceLock<Option<String>> = OnceLock::new();
+
+/// Store the API token from config. None = auth disabled (public).
+pub fn set_api_token(token: Option<String>) {
+    let _ = API_TOKEN.set(token);
+}
+
+/// Check Authorization header for write requests. Returns Ok(()) if allowed.
+fn check_auth(method: &str, raw: &str) -> Result<(), String> {
+    // Only check write methods
+    if method != "POST" && method != "PATCH" && method != "DELETE" {
+        return Ok(());
+    }
+    let required = API_TOKEN.get().and_then(|t| t.as_deref());
+    match required {
+        None | Some("") => Ok(()), // auth disabled or empty token
+        Some(token) => {
+            // Extract Authorization: Bearer <token> from headers
+            let auth_header = raw.lines()
+                .find(|l| l.to_lowercase().starts_with("authorization:"))
+                .unwrap_or("");
+            let provided = auth_header
+                .trim_start_matches(|c: char| c != ' ' && c != ':')
+                .trim_start_matches(':')
+                .trim()
+                .trim_start_matches("Bearer ")
+                .trim();
+            if provided == token {
+                Ok(())
+            } else {
+                Err(format!("Invalid or missing API token. Use Authorization: Bearer <token> header for write operations."))
+            }
+        }
+    }
+}
 
 /// Regenerate the AppData.qml singleton with fresh shipment data.
 /// Called at startup and after every mutation.
@@ -265,10 +303,11 @@ const API_PORT: u16 = 19876;
 ///   OPTIONS *                       → CORS preflight
 pub fn start_command_server() {
     let rt = crate::TOKIO_RT.get().expect("Tokio runtime not initialized");
-    let listener = std::net::TcpListener::bind(format!("127.0.0.1:{API_PORT}"))
+    let bind_host = std::env::var("LW_BIND_HOST").unwrap_or_else(|_| "127.0.0.1".into());
+    let listener = std::net::TcpListener::bind(format!("{bind_host}:{API_PORT}"))
         .expect("Failed to bind API server");
     listener.set_nonblocking(false).ok();
-    log::info!("REST API server listening on http://127.0.0.1:{API_PORT}");
+    log::info!("REST API server listening on http://{bind_host}:{API_PORT}");
 
     rt.spawn(async move {
         for stream in listener.incoming() {
@@ -280,7 +319,7 @@ pub fn start_command_server() {
                         let raw = String::from_utf8_lossy(&buf[..n]).to_string();
                         let (status, content_type, body) = route_request(&raw).await;
                         let resp = format!(
-                            "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, PATCH, DELETE, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\nContent-Length: {}\r\n\r\n",
+                            "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, PATCH, DELETE, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization\r\nContent-Length: {}\r\n\r\n",
                             body.as_bytes().len()
                         );
                         let _ = stream.write_all(resp.as_bytes());
@@ -326,7 +365,26 @@ async fn route_request(raw: &str) -> (&'static str, &'static str, String) {
         return ("204 No Content", "text/plain", String::new());
     }
 
+    // ── Auth check for write operations ──
+    // Skip auth for login endpoint + health
+    if path != "/api/login" && path != "/health" {
+        if let Err(msg) = check_auth(method, raw) {
+            return ("401 Unauthorized", "application/json", json_error("UNAUTHORIZED", &msg));
+        }
+    }
+
     // ── Route matching ──
+    // GET /health — Docker healthcheck
+    if method == "GET" && path == "/health" {
+        return ("200 OK", "application/json",
+            serde_json::json!({ "status": "healthy", "version": "0.2.0" }).to_string());
+    }
+
+    // POST /api/login
+    if method == "POST" && path == "/api/login" {
+        return handle_login(pool, &body).await;
+    }
+
     // GET /api/dashboard
     if method == "GET" && path == "/api/dashboard" {
         return handle_dashboard(pool).await;
@@ -430,6 +488,31 @@ fn url_decode(s: &str) -> String {
 }
 
 // ── Route handlers ──
+
+// ── Handler: POST /api/login ──
+async fn handle_login(pool: &sqlx::PgPool, body: &str) -> (&'static str, &'static str, String) {
+    use serde::Deserialize;
+    #[derive(Deserialize)]
+    struct LoginInput { username: String, password: String }
+
+    let input: LoginInput = match serde_json::from_str(body) {
+        Ok(v) => v,
+        Err(e) => return ("400 Bad Request", "application/json", json_error("VALIDATION_ERROR", &format!("Invalid JSON: {e}"))),
+    };
+
+    match db::queries::authenticate_user(pool, &input.username, &input.password).await {
+        Ok(Some(user)) => {
+            let resp = serde_json::json!({
+                "token": "lw-session-",  // simple static token since passwords are plain-text
+                "username": user.username,
+                "role": user.role,
+            });
+            ("200 OK", "application/json", serde_json::to_string(&resp).unwrap_or_default())
+        }
+        Ok(None) => ("401 Unauthorized", "application/json", json_error("UNAUTHORIZED", "Invalid username or password")),
+        Err(e) => ("500 Internal Server Error", "application/json", json_error("DB_ERROR", &e.to_string())),
+    }
+}
 
 async fn handle_dashboard(pool: &sqlx::PgPool) -> (&'static str, &'static str, String) {
     match db::queries::list_shipments(pool).await {

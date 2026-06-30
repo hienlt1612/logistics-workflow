@@ -1,0 +1,20 @@
+# Exclude from Docker build context
+/target/
+web/node_modules/
+web/dist/
+.web/
+node_modules/
+.hermes/
+*.log
+*.bak
+*.orig
+config.toml
+.git/
+.gitignore
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+workbook1.xlsx
+logistics-workflow-exports/
+docker-compose.override.yml

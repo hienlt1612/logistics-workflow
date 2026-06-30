@@ -30,8 +30,9 @@ watch(
 );
 
 function validate(): boolean {
-  if (!form.value.customs_date) { store.lastToast = { text: 'Customs Date is required', type: 'error' }; return false; }
-  if (!form.value.customs_number.trim()) { store.lastToast = { text: 'Customs Number is required', type: 'error' }; return false; }
+  const t = (v: unknown) => String(v ?? '').trim();
+  if (!t(form.value.customs_date)) { store.lastToast = { text: 'Customs Date is required', type: 'error' }; return false; }
+  if (!t(form.value.customs_number)) { store.lastToast = { text: 'Customs Number is required', type: 'error' }; return false; }
   return true;
 }
 

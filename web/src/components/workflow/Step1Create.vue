@@ -42,10 +42,11 @@ watch(
 );
 
 function validate(): boolean {
+  const t = (v: unknown) => String(v ?? '').trim();
   const req = ['sc_po_id', 'buyer_name', 'booking_number', 'shipping_line', 'origin_port'];
   for (const key of req) {
-    const val = (form.value as unknown as Record<string, string>)[key];
-    if (!val || !val.trim()) {
+    const val = (form.value as unknown as Record<string, unknown>)[key];
+    if (!t(val)) {
       store.lastToast = { text: `${key.replace(/_/g, ' ').toUpperCase()} is required`, type: 'error' };
       return false;
     }

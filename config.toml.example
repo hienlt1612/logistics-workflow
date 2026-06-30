@@ -5,4 +5,7 @@ host = "127.0.0.1"
 port = 5432
 db_name = "logistics_workflow"
 user = "mim_dev"
-password = "your_password_here"
+password = "your_password"
+# API token for write-protection. POST/PATCH/DELETE require Authorization: Bearer <token>
+# Leave empty "" to disable auth (all operations public)
+api_token = "change-me-to-a-secret-token"

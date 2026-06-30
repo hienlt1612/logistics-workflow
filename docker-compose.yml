@@ -1,0 +1,74 @@
+version: "3.9"
+
+services:
+  # ── PostgreSQL ─────────────────────────────────
+  db:
+    image: postgres:17-alpine
+    container_name: lw-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-logistics_workflow}
+      POSTGRES_USER: ${DB_USER:-lw_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-change-me-in-production}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db-backup:/docker-entrypoint-initdb.d:ro   # auto-restore on first run
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-lw_user} -d ${DB_NAME:-logistics_workflow}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - lw-net
+    ports:
+      - "127.0.0.1:5432:5432"   # only local, not exposed to internet
+
+  # ── API Backend (Rust) ─────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lw-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      RUST_LOG: ${RUST_LOG:-info}
+      LW_BIND_HOST: "0.0.0.0"
+      # Env-based config (no config.toml needed — see src/config.rs)
+      LW_DB_HOST: db
+      LW_DB_PORT: "5432"
+      LW_DB_NAME: ${DB_NAME:-logistics_workflow}
+      LW_DB_USER: ${DB_USER:-lw_user}
+      LW_DB_PASSWORD: ${DB_PASSWORD:-change-me-in-production}
+      LW_API_TOKEN: ${API_TOKEN:-change-me-to-a-secret-token}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:19876/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - lw-net
+
+  # ── Nginx (Frontend + Reverse Proxy) ───────────
+  nginx:
+    image: nginx:alpine
+    container_name: lw-nginx
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "${PORT:-80}:80"
+    volumes:
+      - ./web/dist:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - lw-net
+
+volumes:
+  pgdata:
+
+networks:
+  lw-net:
+    driver: bridge

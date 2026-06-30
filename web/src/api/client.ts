@@ -2,6 +2,16 @@
 
 const BASE = 'http://127.0.0.1:19876';
 
+// ── Auth ──
+// Read API token from localStorage (set by user via devtools or env). Falls back to env var.
+function getToken(): string | null {
+  return localStorage.getItem('LW_API_TOKEN') || null;
+}
+function authHeader(): Record<string, string> {
+  const token = getToken();
+  return token ? { 'Authorization': `Bearer ${token}` } : {};
+}
+
 export interface Shipment {
   id: number;
   shipment_ref: string;
@@ -93,12 +103,12 @@ class ApiClientError extends Error {
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const method = options?.method || 'GET';
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (method !== 'GET') Object.assign(headers, authHeader());
   const res = await fetch(`${BASE}${path}`, {
     ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
+    headers: { ...headers, ...options?.headers },
   });
 
   if (!res.ok) {
@@ -156,13 +166,13 @@ export async function toggleChecklist(id: number, field: string, value: boolean)
 }
 
 export async function deleteShipment(id: number): Promise<void> {
-  await fetch(`${BASE}/api/shipments/${id}`, { method: 'DELETE' });
+  await fetch(`${BASE}/api/shipments/${id}`, { method: 'DELETE', headers: authHeader() });
 }
 
 export async function batchAdvanceStatus(ids: number[], status: string): Promise<number> {
   const res = await fetch(`${BASE}/api/shipments/batch`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
     body: JSON.stringify({ ids, status }),
   });
   if (!res.ok) throw new Error('Batch update failed');

@@ -20,6 +20,8 @@ Thumbs.db
 # Secrets / config
 config.toml
 !config.toml.example
+.env
+!env.example
 
 # Logs
 *.log
@@ -33,3 +35,7 @@ logistics-workflow-exports/
 # Backup files
 *.bak
 *.orig
+
+# Docker / DB dumps
+db-backup/
+config.docker.toml
