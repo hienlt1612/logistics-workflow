@@ -332,7 +332,7 @@ pub fn start_command_server() {
                         let raw = String::from_utf8_lossy(&buf[..n]).to_string();
                         let (status, content_type, body) = route_request(&raw).await;
                         let resp = format!(
-                            "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, PATCH, DELETE, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization\r\nContent-Length: {}\r\n\r\n",
+                            "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, PATCH, DELETE, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization, X-User-Role\r\nContent-Length: {}\r\n\r\n",
                             body.as_bytes().len()
                         );
                         let _ = stream.write_all(resp.as_bytes());
