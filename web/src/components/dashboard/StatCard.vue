@@ -17,24 +17,24 @@ defineProps<{
 .stat-card {
   background: var(--bg-card);
   border-radius: var(--radius-md);
-  padding: var(--space-lg);
+  padding: var(--space-md) var(--space-sm);
   border-top: 3px solid;
   box-shadow: var(--shadow-sm);
   text-align: center;
 }
 
 .stat-value {
-  font-size: var(--text-3xl);
+  font-size: var(--text-xl);
   font-weight: 700;
   color: var(--text-primary);
-  line-height: 1.2;
+  line-height: 1.1;
 }
 
 .stat-label {
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
   color: var(--text-secondary);
-  margin-top: var(--space-xs);
+  margin-top: 2px;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.3px;
 }
 </style>
