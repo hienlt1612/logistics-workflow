@@ -44,6 +44,48 @@ pub struct Shipment {
     pub originals_description: Option<String>,
     pub telex_released: bool,
     pub payment_received: bool,
+    pub shipping_call_id: Option<i64>,
+}
+
+// ponytail: 1 row = 1 container. COUNT(*) on containers table = loaded count.
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct Container {
+    pub id: i32,
+    pub shipment_id: i64,
+    pub container_number: String,
+    pub seal_number: Option<String>,
+    pub warehouse_name: Option<String>,
+    pub weight_kg: Option<BigDecimal>,
+    pub cbm: Option<BigDecimal>,
+    pub status: String,
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct ShippingCall {
+    pub id: i64,
+    pub call_ref: String,
+    pub sc_po_id: Option<String>,
+    pub sc_po_date: Option<NaiveDate>,
+    pub sc_po_by: Option<String>,
+    pub buyer_name: String,
+    pub incoterms: String,
+    pub product_description: Option<String>,
+    pub total_containers: i32,
+    pub status: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct CallWarehouse {
+    pub id: i32,
+    pub shipping_call_id: i64,
+    pub warehouse_name: String,
+    pub planned_containers: i32,
+    pub loaded_containers: i32,
+    pub status: String,
+    pub notes: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, sqlx::FromRow)]
