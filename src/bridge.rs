@@ -416,6 +416,16 @@ async fn route_request(raw: &str) -> (&'static str, &'static str, String) {
         return handle_list_shipments(pool, status_filter, page, page_size).await;
     }
 
+    // GET /api/shipments/:id/containers (must be before generic :id)
+    if method == "GET" && path.starts_with("/api/shipments/") && path.ends_with("/containers") {
+        let rest = &path["/api/shipments/".len()..];
+        let id_str = rest.trim_end_matches("/containers");
+        if let Ok(id) = id_str.parse::<i64>() {
+            return handle_list_containers(pool, id).await;
+        }
+        return ("400 Bad Request", "application/json", json_error("BAD_REQUEST", "Invalid shipment ID"));
+    }
+
     // GET /api/shipments/:id
     if method == "GET" && path.starts_with("/api/shipments/") {
         let id_str = &path["/api/shipments/".len()..];
@@ -462,21 +472,7 @@ async fn route_request(raw: &str) -> (&'static str, &'static str, String) {
         return handle_list_calls(pool).await;
     }
 
-    // GET /api/shipping-calls/:id
-    if method == "GET" && path.starts_with("/api/shipping-calls/") {
-        let id_str = &path["/api/shipping-calls/".len()..];
-        if let Ok(id) = id_str.parse::<i64>() {
-            return handle_get_call(pool, id).await;
-        }
-        return ("400 Bad Request", "application/json", json_error("BAD_REQUEST", "Invalid call ID"));
-    }
-
-    // POST /api/shipping-calls
-    if method == "POST" && path == "/api/shipping-calls" {
-        return handle_create_call(pool, &body).await;
-    }
-
-    // GET /api/shipping-calls/:id/warehouses
+    // GET /api/shipping-calls/:id/warehouses (must be before generic :id)
     if method == "GET" && path.starts_with("/api/shipping-calls/") && path.ends_with("/warehouses") {
         let rest = &path["/api/shipping-calls/".len()..];
         let id_str = rest.trim_end_matches("/warehouses");
@@ -486,19 +482,23 @@ async fn route_request(raw: &str) -> (&'static str, &'static str, String) {
         return ("400 Bad Request", "application/json", json_error("BAD_REQUEST", "Invalid call ID"));
     }
 
+    // POST /api/shipping-calls
+    if method == "POST" && path == "/api/shipping-calls" {
+        return handle_create_call(pool, &body).await;
+    }
+
+    // GET /api/shipping-calls/:id
+    if method == "GET" && path.starts_with("/api/shipping-calls/") {
+        let id_str = &path["/api/shipping-calls/".len()..];
+        if let Ok(id) = id_str.parse::<i64>() {
+            return handle_get_call(pool, id).await;
+        }
+        return ("400 Bad Request", "application/json", json_error("BAD_REQUEST", "Invalid call ID"));
+    }
+
     // POST /api/containers
     if method == "POST" && path == "/api/containers" {
         return handle_create_container(pool, &body).await;
-    }
-
-    // GET /api/shipments/:id/containers
-    if method == "GET" && path.starts_with("/api/shipments/") && path.ends_with("/containers") {
-        let rest = &path["/api/shipments/".len()..];
-        let id_str = rest.trim_end_matches("/containers");
-        if let Ok(id) = id_str.parse::<i64>() {
-            return handle_list_containers(pool, id).await;
-        }
-        return ("400 Bad Request", "application/json", json_error("BAD_REQUEST", "Invalid shipment ID"));
     }
 
     // PATCH /api/shipments/:id

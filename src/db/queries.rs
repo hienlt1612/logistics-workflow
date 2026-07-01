@@ -378,7 +378,14 @@ pub struct CreateShippingCallInput {
     pub incoterms: String,
     pub product_description: Option<String>,
     pub total_containers: i32,
-    pub warehouses: Option<Vec<CreateWarehouseInput>>,
+    // ponytail: warehouses inline — no shipping_call_id needed (backend fills from call.id)
+    pub warehouses: Option<Vec<InlineWarehouse>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct InlineWarehouse {
+    pub warehouse_name: String,
+    pub planned_containers: i32,
 }
 
 #[derive(Debug, Deserialize)]
