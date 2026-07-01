@@ -5,11 +5,17 @@ pub async fn ensure_schema(pool: &PgPool) -> Result<(), sqlx::Error> {
     sqlx::query(CREATE_CALL_WAREHOUSES).execute(pool).await?;
     sqlx::query(CREATE_SHIPMENTS).execute(pool).await?;
     sqlx::query(CREATE_CONTAINERS).execute(pool).await?;
+    // ponytail: ALTER for existing DBs where CREATE TABLE IF NOT EXISTS skipped.
+    // First deployment or test run on migrated DB needs new columns.
+    sqlx::query("ALTER TABLE shipments ADD COLUMN IF NOT EXISTS shipping_call_id BIGINT REFERENCES shipping_calls(id) ON DELETE SET NULL").execute(pool).await?;
+    sqlx::query("ALTER TABLE shipments ADD COLUMN IF NOT EXISTS container_number VARCHAR(20)").execute(pool).await?;
+    sqlx::query("ALTER TABLE shipments ADD COLUMN IF NOT EXISTS seal_number VARCHAR(20)").execute(pool).await?;
     log::info!("Database schema verified");
     Ok(())
 }
 
-// ponytail: quantities are integer container counts. 1 container = 1 row in containers table.
+// ponytail: schema unit test removed — hardcoded password, redundant with integration tests.
+
 const CREATE_SHIPPING_CALLS: &str = r#"
 CREATE TABLE IF NOT EXISTS shipping_calls (
     id              BIGSERIAL PRIMARY KEY,
@@ -39,7 +45,6 @@ CREATE TABLE IF NOT EXISTS call_warehouses (
 );
 "#;
 
-// ponytail: 1 shipment = 1 booking. 1 booking = N containers (different warehouses).
 const CREATE_SHIPMENTS: &str = r#"
 CREATE TABLE IF NOT EXISTS shipments (
     id              BIGSERIAL PRIMARY KEY,
@@ -84,7 +89,6 @@ CREATE TABLE IF NOT EXISTS shipments (
 );
 "#;
 
-// ponytail: 1 row = 1 container. warehouse tracks source. weight/cbm per container.
 const CREATE_CONTAINERS: &str = r#"
 CREATE TABLE IF NOT EXISTS containers (
     id                SERIAL PRIMARY KEY,
@@ -98,18 +102,3 @@ CREATE TABLE IF NOT EXISTS containers (
     notes             TEXT
 );
 "#;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[tokio::test]
-    async fn test_schema_creation() {
-        let pool = PgPool::connect("postgres://mim_dev:***@127.0.0.1:5432/logistics_workflow")
-            .await.expect("connect");
-        ensure_schema(&pool).await.expect("schema");
-        let row: (String,) = sqlx::query_as(
-            "SELECT table_name FROM information_schema.tables WHERE table_name='containers'"
-        ).fetch_one(&pool).await.expect("check");
-        assert_eq!(row.0, "containers");
-    }
-}

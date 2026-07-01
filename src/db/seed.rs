@@ -18,16 +18,6 @@ pub async fn seed_if_empty(pool: &PgPool) -> Result<(), sqlx::Error> {
         sqlx::query(sql).execute(pool).await?;
     }
 
-    // Seed customers
-    for sql in SEED_CUSTOMERS {
-        sqlx::query(sql).execute(pool).await?;
-    }
-
-    // Seed carriers
-    for sql in SEED_CARRIERS {
-        sqlx::query(sql).execute(pool).await?;
-    }
-
     log::info!("Seed data inserted");
     Ok(())
 }
@@ -110,19 +100,4 @@ const SEED_SHIPMENTS: &[&str] = &[
     )"#,
 ];
 
-const SEED_CUSTOMERS: &[&str] = &[
-    "INSERT INTO customers (name) VALUES ('Hung Phat') ON CONFLICT (name) DO NOTHING",
-    "INSERT INTO customers (name) VALUES ('An Dien') ON CONFLICT (name) DO NOTHING",
-    "INSERT INTO customers (name) VALUES ('Kotor') ON CONFLICT (name) DO NOTHING",
-    "INSERT INTO customers (name) VALUES ('Global Trade') ON CONFLICT (name) DO NOTHING",
-    "INSERT INTO customers (name) VALUES ('UK Trading Holding') ON CONFLICT (name) DO NOTHING",
-    "INSERT INTO customers (name) VALUES ('Postera') ON CONFLICT (name) DO NOTHING",
-    "INSERT INTO customers (name) VALUES ('Element') ON CONFLICT (name) DO NOTHING",
-];
-
-const SEED_CARRIERS: &[&str] = &[
-    "INSERT INTO carriers (name) VALUES ('Yang Ming') ON CONFLICT (name) DO NOTHING",
-    "INSERT INTO carriers (name) VALUES ('Maersk') ON CONFLICT (name) DO NOTHING",
-    "INSERT INTO carriers (name) VALUES ('APL') ON CONFLICT (name) DO NOTHING",
-    "INSERT INTO carriers (name) VALUES ('Evergreen') ON CONFLICT (name) DO NOTHING",
-];
+// ponytail: SEED_CUSTOMERS + SEED_CARRIERS removed — tables dropped in schema.
