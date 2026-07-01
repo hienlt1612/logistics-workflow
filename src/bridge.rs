@@ -176,24 +176,169 @@ pub fn toggle_checklist(id: i64, field: &str, value: bool) -> Result<String, Str
 
 /// Export all shipments to workbook1-format Excel file.
 pub async fn export_workbook1_async(pool: &sqlx::PgPool) -> Result<Vec<u8>, String> {
+    // ponytail: full business-process report — calls → shipments hierarchy.
+    let calls = db::queries::list_shipping_calls(pool).await
+        .map_err(|e| format!("DB error: {e}"))?;
     let shipments = db::queries::list_shipments(pool).await
         .map_err(|e| format!("DB error: {e}"))?;
+    let ctn = db::queries::count_containers_by_shipment(pool).await
+        .map_err(|e| format!("DB error: {e}"))?;
 
-    let bytes = write_workbook1_xlsx_binary(&shipments)
+    let bytes = write_business_report_xlsx(&calls, &shipments, &ctn)
         .map_err(|e| format!("Excel write error: {e}"))?;
 
-    log::info!("Exported {} shipments to XLSX ({:.1} KB)", shipments.len(), bytes.len() as f64 / 1024.0);
+    log::info!("Exported business report: {} calls, {} shipments ({:.1} KB)",
+        calls.len(), shipments.len(), bytes.len() as f64 / 1024.0);
     Ok(bytes)
 }
 
-fn write_workbook1_xlsx_binary(
+// ponytail: status → cell color, shared by pivot + summary
+fn status_color(status: &str) -> rust_xlsxwriter::Color {
+    use rust_xlsxwriter::Color;
+    match status {
+        "OPEN" => Color::RGB(0x3498DB),
+        "ON_LOADING" => Color::RGB(0x27AE60),
+        "CLOSED" => Color::RGB(0x7F8C8D),
+        "DRAFT" => Color::RGB(0x95A5A6),
+        "DOCUMENTS_READY" => Color::RGB(0x2980B9),
+        "CUSTOMS_CLEARED" => Color::RGB(0xF39C12),
+        "CHECKLIST_IN_PROGRESS" => Color::RGB(0x8E44AD),
+        "TELEX_RELEASED" => Color::RGB(0xC0392B),
+        _ => Color::RGB(0x34495E),
+    }
+}
+
+fn write_business_report_xlsx(
+    calls: &[db::queries::ShippingCall],
     shipments: &[db::queries::Shipment],
+    ctn: &std::collections::HashMap<i64, i64>,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     use rust_xlsxwriter::{Workbook, Format, Color, FormatBorder};
+    use std::collections::HashMap;
 
     let mut workbook = Workbook::new();
-    let sheet = workbook.add_worksheet();
-    sheet.set_name("Shipments")?;
+
+    // group shipments by call id (None = unassigned)
+    let mut by_call: HashMap<Option<i64>, Vec<&db::queries::Shipment>> = HashMap::new();
+    for s in shipments { by_call.entry(s.shipping_call_id).or_default().push(s); }
+
+    // ---- Sheet 1: Pivot View (call → shipment hierarchy) ----
+    let pv = workbook.add_worksheet();
+    pv.set_name("Pivot View")?;
+    let headers = ["Level","Ref","Buyer / Booking","Status","Incoterms / Line",
+        "Product / ETD","Containers","Value USD","BL / Invoice","Telex","Customs","Date"];
+    let hdr = Format::new().set_bold().set_background_color(Color::RGB(0x2C3E50))
+        .set_font_color(Color::RGB(0xFFFFFF)).set_border(FormatBorder::Thin);
+    for (i, h) in headers.iter().enumerate() {
+        pv.write_string_with_format(0, i as u16, *h, &hdr)?;
+    }
+    pv.set_freeze_panes(1, 0)?;
+
+    let mut r: u32 = 1;
+    // status rank for operator-friendly ordering
+    let rank = |s: &str| match s { "OPEN" => 0, "ON_LOADING" => 1, "CLOSED" => 2, _ => 3 };
+    let mut ordered: Vec<&db::queries::ShippingCall> = calls.iter().collect();
+    ordered.sort_by(|a, b| rank(&a.status).cmp(&rank(&b.status)).then(a.call_ref.cmp(&b.call_ref)));
+
+    let write_ship_rows = |pv: &mut rust_xlsxwriter::Worksheet, r: &mut u32,
+        ships: &[&db::queries::Shipment]| -> Result<(), Box<dyn std::error::Error>> {
+        let cell = Format::new().set_border(FormatBorder::Thin);
+        let ind = Format::new().set_border(FormatBorder::Thin).set_font_color(Color::RGB(0x7F8C8D));
+        for s in ships {
+            let st = Format::new().set_border(FormatBorder::Thin).set_bold()
+                .set_font_color(status_color(&s.status));
+            let telex_fmt = Format::new().set_border(FormatBorder::Thin).set_bold()
+                .set_font_color(if s.telex_released { Color::RGB(0x27AE60) } else { Color::RGB(0x95A5A6) });
+            pv.write_string_with_format(*r, 0, "   └ SHIP", &ind)?;
+            pv.write_string_with_format(*r, 1, s.booking_number.as_deref()
+                .unwrap_or(&s.shipment_ref), &cell)?;
+            pv.write_string_with_format(*r, 2, s.buyer_name.as_deref().unwrap_or(""), &cell)?;
+            pv.write_string_with_format(*r, 3, &s.status, &st)?;
+            pv.write_string_with_format(*r, 4, s.shipping_line.as_deref().unwrap_or(""), &cell)?;
+            pv.write_string_with_format(*r, 5, &s.etd.map(|d| d.to_string()).unwrap_or_default(), &cell)?;
+            pv.write_number_with_format(*r, 6, *ctn.get(&s.id).unwrap_or(&0) as f64, &cell)?;
+            match &s.total_value_usd {
+                Some(v) => pv.write_number_with_format(*r, 7, v.to_string().parse::<f64>().unwrap_or(0.0), &cell)?,
+                None => pv.write_string_with_format(*r, 7, "", &cell)?,
+            };
+            pv.write_string_with_format(*r, 8, s.bill_of_lading.as_deref()
+                .or(s.invoice_number.as_deref()).unwrap_or(""), &cell)?;
+            pv.write_string_with_format(*r, 9, if s.telex_released { "Yes" } else { "No" }, &telex_fmt)?;
+            pv.write_string_with_format(*r, 10, s.customs_status.as_deref().unwrap_or(""), &cell)?;
+            pv.write_string_with_format(*r, 11, &s.updated_at.format("%Y-%m-%d").to_string(), &cell)?;
+            *r += 1;
+        }
+        Ok(())
+    };
+
+    for c in &ordered {
+        let ships = by_call.get(&Some(c.id)).cloned().unwrap_or_default();
+        let loaded: i64 = ships.iter().map(|s| ctn.get(&s.id).copied().unwrap_or(0)).sum();
+        let banner = Format::new().set_bold().set_border(FormatBorder::Thin)
+            .set_background_color(status_color(&c.status)).set_font_color(Color::RGB(0xFFFFFF));
+        pv.write_string_with_format(r, 0, "CALL", &banner)?;
+        pv.write_string_with_format(r, 1, &c.call_ref, &banner)?;
+        pv.write_string_with_format(r, 2, &c.buyer_name, &banner)?;
+        pv.write_string_with_format(r, 3, &c.status, &banner)?;
+        pv.write_string_with_format(r, 4, &c.incoterms, &banner)?;
+        pv.write_string_with_format(r, 5, c.product_description.as_deref().unwrap_or(""), &banner)?;
+        pv.write_string_with_format(r, 6, &format!("{loaded}/{}", c.total_containers), &banner)?;
+        for col in 7..=10 { pv.write_string_with_format(r, col, "", &banner)?; }
+        pv.write_string_with_format(r, 11, &c.created_at.format("%Y-%m-%d").to_string(), &banner)?;
+        r += 1;
+        write_ship_rows(pv, &mut r, &ships)?;
+        r += 1; // spacer between calls
+    }
+    // unassigned shipments
+    let orphans = by_call.get(&None).cloned().unwrap_or_default();
+    if !orphans.is_empty() {
+        let banner = Format::new().set_bold().set_border(FormatBorder::Thin)
+            .set_background_color(Color::RGB(0x34495E)).set_font_color(Color::RGB(0xFFFFFF));
+        pv.write_string_with_format(r, 0, "CALL", &banner)?;
+        pv.write_string_with_format(r, 1, "UNASSIGNED", &banner)?;
+        for col in 2..=11 { pv.write_string_with_format(r, col, "", &banner)?; }
+        r += 1;
+        write_ship_rows(pv, &mut r, &orphans)?;
+    }
+    for col in 0..headers.len() as u16 { pv.set_column_width(col, 18)?; }
+
+    // ---- Sheet 2: Shipments (flat detail, all columns) ----
+    let det = workbook.add_worksheet();
+    det.set_name("Shipments")?;
+    write_shipments_sheet(det, shipments)?;
+
+    // ---- Sheet 3: Summary ----
+    let sm = workbook.add_worksheet();
+    sm.set_name("Summary")?;
+    let lbl = Format::new().set_bold();
+    let mut sr: u32 = 0;
+    sm.write_string_with_format(sr, 0, "Shipping Calls by Status", &lbl)?; sr += 1;
+    for st in ["OPEN","ON_LOADING","CLOSED"] {
+        let n = calls.iter().filter(|c| c.status == st).count();
+        sm.write_string(sr, 0, st)?; sm.write_number(sr, 1, n as f64)?; sr += 1;
+    }
+    sm.write_string_with_format(sr, 0, "Total Calls", &lbl)?;
+    sm.write_number_with_format(sr, 1, calls.len() as f64, &lbl)?; sr += 2;
+    sm.write_string_with_format(sr, 0, "Shipments by Status", &lbl)?; sr += 1;
+    for st in ["DRAFT","DOCUMENTS_READY","CUSTOMS_CLEARED","CHECKLIST_IN_PROGRESS","TELEX_RELEASED"] {
+        let n = shipments.iter().filter(|s| s.status == st).count();
+        sm.write_string(sr, 0, st)?; sm.write_number(sr, 1, n as f64)?; sr += 1;
+    }
+    sm.write_string_with_format(sr, 0, "Total Shipments", &lbl)?;
+    sm.write_number_with_format(sr, 1, shipments.len() as f64, &lbl)?; sr += 2;
+    let total_ctn: i64 = ctn.values().sum();
+    sm.write_string_with_format(sr, 0, "Total Containers Loaded", &lbl)?;
+    sm.write_number_with_format(sr, 1, total_ctn as f64, &lbl)?;
+    sm.set_column_width(0, 26)?; sm.set_column_width(1, 12)?;
+
+    Ok(workbook.save_to_buffer()?)
+}
+
+fn write_shipments_sheet(
+    sheet: &mut rust_xlsxwriter::Worksheet,
+    shipments: &[db::queries::Shipment],
+) -> Result<(), Box<dyn std::error::Error>> {
+    use rust_xlsxwriter::{Format, Color, FormatBorder};
 
     let headers = [
         "Shipment Ref", "Status",
@@ -269,9 +414,7 @@ fn write_workbook1_xlsx_binary(
     for col in 0..headers.len() as u16 {
         sheet.set_column_width(col, 16)?;
     }
-
-    let buf = workbook.save_to_buffer()?;
-    Ok(buf)
+    Ok(())
 }
 
 
@@ -327,9 +470,37 @@ pub fn start_command_server() {
             match stream {
                 Ok(mut stream) => {
                     use std::io::{Read, Write};
-                    let mut buf = [0u8; 16384];
-                    if let Ok(n) = stream.read(&mut buf) {
-                        let raw = String::from_utf8_lossy(&buf[..n]).to_string();
+                    // ponytail: read until headers complete, then until full
+                    // Content-Length body arrives. Fixes body loss when a client
+                    // splits headers/body across TCP segments.
+                    let mut data = Vec::new();
+                    let mut chunk = [0u8; 16384];
+                    let mut need: Option<usize> = None;
+                    loop {
+                        match stream.read(&mut chunk) {
+                            Ok(0) => break,
+                            Ok(n) => {
+                                data.extend_from_slice(&chunk[..n]);
+                                if need.is_none() {
+                                    if let Some(hend) = data.windows(4).position(|w| w == b"\r\n\r\n") {
+                                        let head = String::from_utf8_lossy(&data[..hend]).to_lowercase();
+                                        let cl = head.lines()
+                                            .find_map(|l| l.strip_prefix("content-length:"))
+                                            .and_then(|v| v.trim().parse::<usize>().ok())
+                                            .unwrap_or(0);
+                                        need = Some(hend + 4 + cl);
+                                    }
+                                }
+                                if let Some(total) = need {
+                                    if data.len() >= total { break; }
+                                }
+                                if n < chunk.len() && need.is_none() { break; }
+                            }
+                            Err(_) => break,
+                        }
+                    }
+                    {
+                        let raw = String::from_utf8_lossy(&data).to_string();
                         let (status, content_type, body) = route_request(&raw).await;
                         let resp = format!(
                             "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, PATCH, DELETE, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization, X-User-Role\r\nContent-Length: {}\r\n\r\n",
@@ -472,12 +643,30 @@ async fn route_request(raw: &str) -> (&'static str, &'static str, String) {
         return handle_list_calls(pool).await;
     }
 
+    // DELETE /api/shipping-calls/:id (must be before generic :id)
+    if method == "DELETE" && path.starts_with("/api/shipping-calls/") {
+        let id_str = &path["/api/shipping-calls/".len()..];
+        if let Ok(id) = id_str.parse::<i64>() {
+            return handle_delete_call(pool, id, raw).await;
+        }
+        return ("400 Bad Request", "application/json", json_error("BAD_REQUEST", "Invalid call ID"));
+    }
+
     // GET /api/shipping-calls/:id/warehouses (must be before generic :id)
     if method == "GET" && path.starts_with("/api/shipping-calls/") && path.ends_with("/warehouses") {
         let rest = &path["/api/shipping-calls/".len()..];
         let id_str = rest.trim_end_matches("/warehouses");
         if let Ok(id) = id_str.parse::<i64>() {
             return handle_list_call_warehouses(pool, id).await;
+        }
+        return ("400 Bad Request", "application/json", json_error("BAD_REQUEST", "Invalid call ID"));
+    }
+
+    // PATCH /api/shipping-calls/:id
+    if method == "PATCH" && path.starts_with("/api/shipping-calls/") {
+        let id_str = &path["/api/shipping-calls/".len()..];
+        if let Ok(id) = id_str.parse::<i64>() {
+            return handle_update_call(pool, id, &body, raw).await;
         }
         return ("400 Bad Request", "application/json", json_error("BAD_REQUEST", "Invalid call ID"));
     }
@@ -508,6 +697,24 @@ async fn route_request(raw: &str) -> (&'static str, &'static str, String) {
             return handle_update_shipment(pool, id, &body, raw).await;
         }
         return ("400 Bad Request", "application/json", json_error("BAD_REQUEST", "Invalid shipment ID"));
+    }
+
+    // DELETE /api/containers/:id
+    if method == "DELETE" && path.starts_with("/api/containers/") {
+        let id_str = &path["/api/containers/".len()..];
+        if let Ok(id) = id_str.parse::<i64>() {
+            return handle_delete_container(pool, id, raw).await;
+        }
+        return ("400 Bad Request", "application/json", json_error("BAD_REQUEST", "Invalid container ID"));
+    }
+
+    // PATCH /api/containers/:id
+    if method == "PATCH" && path.starts_with("/api/containers/") {
+        let id_str = &path["/api/containers/".len()..];
+        if let Ok(id) = id_str.parse::<i64>() {
+            return handle_update_container(pool, id, &body, raw).await;
+        }
+        return ("400 Bad Request", "application/json", json_error("BAD_REQUEST", "Invalid container ID"));
     }
 
     // 404
@@ -579,8 +786,12 @@ async fn handle_login(pool: &sqlx::PgPool, body: &str) -> (&'static str, &'stati
 }
 
 async fn handle_dashboard(pool: &sqlx::PgPool) -> (&'static str, &'static str, String) {
-    match db::queries::list_shipments(pool).await {
-        Ok(shipments) => {
+    let (shipments, calls) = tokio::join!(
+        db::queries::list_shipments(pool),
+        db::queries::list_shipping_calls(pool),
+    );
+    match (shipments, calls) {
+        (Ok(shipments), Ok(calls)) => {
             let mut draft = 0u32; let mut docs = 0u32; let mut customs = 0u32;
             let mut checklist = 0u32; let mut complete = 0u32; let mut telex = 0u32;
             for s in &shipments {
@@ -594,6 +805,15 @@ async fn handle_dashboard(pool: &sqlx::PgPool) -> (&'static str, &'static str, S
                     _ => {}
                 }
             }
+            let mut calls_open = 0; let mut calls_loading = 0; let mut calls_closed = 0;
+            for c in &calls {
+                match c.status.as_str() {
+                    "OPEN" => calls_open += 1,
+                    "ON_LOADING" => calls_loading += 1,
+                    "CLOSED" => calls_closed += 1,
+                    _ => {}
+                }
+            }
             let summary = serde_json::json!({
                 "total": shipments.len(),
                 "draft": draft,
@@ -601,12 +821,16 @@ async fn handle_dashboard(pool: &sqlx::PgPool) -> (&'static str, &'static str, S
                 "customs": customs,
                 "checklist": checklist + complete,
                 "telex": telex,
+                "calls_total": calls.len(),
+                "calls_open": calls_open,
+                "calls_loading": calls_loading,
+                "calls_closed": calls_closed,
             });
             let body = serde_json::to_string(&summary).unwrap_or_default();
             regenerate_appdata_inline(pool).await;
             ("200 OK", "application/json", body)
         }
-        Err(e) => ("500 Internal Server Error", "application/json", json_error("DB_ERROR", &e.to_string())),
+        (Err(e), _) | (_, Err(e)) => ("500 Internal Server Error", "application/json", json_error("DB_ERROR", &e.to_string())),
     }
 }
 
@@ -648,6 +872,10 @@ async fn handle_create_shipment(pool: &sqlx::PgPool, body: &str) -> (&'static st
     match db::queries::create_shipment(pool, &input).await {
         Ok(s) => {
             let json = serde_json::to_string(&s).unwrap_or_default();
+            // ponytail: sync call status
+            if let Some(cid) = input.shipping_call_id {
+                let _ = db::queries::sync_call_status(pool, cid).await;
+            }
             regenerate_appdata_inline(pool).await;
             ("201 Created", "application/json", json)
         }
@@ -665,7 +893,6 @@ async fn handle_update_shipment(pool: &sqlx::PgPool, id: i64, body: &str, raw: &
     if let Some(new_status) = fields.get("status").and_then(|v| v.as_str()) {
         if new_status != "TELEX_RELEASED" {
             // User is trying to change status away from TELEX_RELEASED
-            // Fetch current shipment to check its current status
             match db::queries::get_shipment(pool, id).await {
                 Ok(Some(current)) => {
                     if current.status == "TELEX_RELEASED" && !is_admin(raw) {
@@ -680,10 +907,13 @@ async fn handle_update_shipment(pool: &sqlx::PgPool, id: i64, body: &str, raw: &
             }
         }
     }
-
     match db::queries::update_shipment_fields(pool, id, &fields).await {
         Ok(s) => {
             let json = serde_json::to_string(&s).unwrap_or_default();
+            // ponytail: sync call status for linked call
+            if let Some(cid) = s.shipping_call_id {
+                let _ = db::queries::sync_call_status(pool, cid).await;
+            }
             regenerate_appdata_inline(pool).await;
             ("200 OK", "application/json", json)
         }
@@ -728,10 +958,18 @@ async fn handle_delete_shipment(pool: &sqlx::PgPool, id: i64, raw: &str) -> (&'s
     if !is_admin(raw) {
         return ("403 Forbidden", "application/json", json_error("FORBIDDEN", "Only admin can delete shipments"));
     }
+    // ponytail: fetch call_id before deleting for status sync
+    let call_id = match db::queries::get_shipment(pool, id).await {
+        Ok(Some(s)) => s.shipping_call_id,
+        _ => None,
+    };
     match db::queries::delete_shipment(pool, id).await {
         Ok(true) => {
+            if let Some(cid) = call_id {
+                let _ = db::queries::sync_call_status(pool, cid).await;
+            }
             regenerate_appdata_inline(pool).await;
-            ("200 OK", "application/json", r#"{"ok":true}"#.into())
+            ("200 OK", "application/json", r#"{"deleted":true}"#.into())
         }
         Ok(false) => ("404 Not Found", "application/json", json_error("NOT_FOUND", &format!("Shipment {id} not found"))),
         Err(e) => ("500 Internal Server Error", "application/json", json_error("DB_ERROR", &e.to_string())),
@@ -772,7 +1010,7 @@ async fn handle_export_all() -> (&'static str, &'static str, String) {
             let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
             let json = serde_json::json!({
                 "data": b64,
-                "filename": "workbook1_export.xlsx",
+                "filename": "business_process_report.xlsx",
                 "contentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             });
             ("200 OK", "application/json", serde_json::to_string(&json).unwrap_or_default())
@@ -829,11 +1067,31 @@ async fn handle_get_call(pool: &sqlx::PgPool, id: i64) -> (&'static str, &'stati
     }
 }
 
+// ponytail: delete call — admin-gated
+async fn handle_delete_call(pool: &sqlx::PgPool, id: i64, raw: &str) -> (&'static str, &'static str, String) {
+    if !is_admin(raw) {
+        return ("403 Forbidden", "application/json", json_error("FORBIDDEN", "Only admin can delete shipping calls"));
+    }
+    match db::queries::delete_shipping_call(pool, id).await {
+        Ok(true) => ("200 OK", "application/json", r#"{"deleted":true}"#.into()),
+        Ok(false) => ("404 Not Found", "application/json", json_error("NOT_FOUND", &format!("Call {id} not found"))),
+        Err(e) => ("500 Internal Server Error", "application/json", json_error("DB_ERROR", &e.to_string())),
+    }
+}
+
 async fn handle_create_call(pool: &sqlx::PgPool, body: &str) -> (&'static str, &'static str, String) {
     let input: db::queries::CreateShippingCallInput = match serde_json::from_str(body) {
         Ok(v) => v,
         Err(e) => return ("400 Bad Request", "application/json", json_error("VALIDATION_ERROR", &format!("Invalid JSON: {e}"))),
     };
+    // ponytail: warehouse sum must not exceed total_containers
+    if let Some(ref wh) = input.warehouses {
+        let wh_sum: i32 = wh.iter().map(|w| w.planned_containers).sum();
+        if wh_sum > input.total_containers {
+            return ("400 Bad Request", "application/json",
+                json_error("VALIDATION_ERROR", &format!("Warehouse total ({wh_sum}) exceeds planned containers ({})", input.total_containers)));
+        }
+    }
     match db::queries::create_shipping_call(pool, &input).await {
         Ok(call) => {
             // ponytail: create warehouses inline if provided in same POST
@@ -852,6 +1110,41 @@ async fn handle_create_call(pool: &sqlx::PgPool, body: &str) -> (&'static str, &
     }
 }
 
+// ponytail: update call — same pattern as update_shipment
+async fn handle_update_call(pool: &sqlx::PgPool, id: i64, body: &str, raw: &str) -> (&'static str, &'static str, String) {
+    if !is_admin(raw) {
+        return ("403 Forbidden", "application/json", json_error("FORBIDDEN", "Only admin can update shipping calls"));
+    }
+    let input: db::queries::UpdateShippingCallInput = match serde_json::from_str(body) {
+        Ok(v) => v,
+        Err(e) => return ("400 Bad Request", "application/json", json_error("VALIDATION_ERROR", &format!("Invalid JSON: {e}"))),
+    };
+    // ponytail: warehouse sum must not exceed total_containers
+    if let Some(ref wh) = input.warehouses {
+        let wh_sum: i32 = wh.iter().map(|w| w.planned_containers).sum();
+        if wh_sum > input.total_containers {
+            return ("400 Bad Request", "application/json",
+                json_error("VALIDATION_ERROR", &format!("Warehouse total ({wh_sum}) exceeds planned containers ({})", input.total_containers)));
+        }
+    }
+    // ponytail: if warehouses provided, atomically replace all
+    if let Some(ref warehouses) = input.warehouses {
+        let _ = db::queries::delete_call_warehouses(pool, id).await;
+        for w in warehouses {
+            let _ = db::queries::create_call_warehouse(pool, &db::queries::CreateWarehouseInput {
+                shipping_call_id: id,
+                warehouse_name: w.warehouse_name.clone(),
+                planned_containers: w.planned_containers,
+            }).await;
+        }
+    }
+    match db::queries::update_shipping_call(pool, id, &input).await {
+        Ok(Some(call)) => ("200 OK", "application/json", serde_json::to_string(&call).unwrap_or_default()),
+        Ok(None) => ("404 Not Found", "application/json", json_error("NOT_FOUND", &format!("Call {id} not found"))),
+        Err(e) => ("500 Internal Server Error", "application/json", json_error("DB_ERROR", &e.to_string())),
+    }
+}
+
 async fn handle_list_call_warehouses(pool: &sqlx::PgPool, call_id: i64) -> (&'static str, &'static str, String) {
     match db::queries::list_call_warehouses(pool, call_id).await {
         Ok(warehouses) => ("200 OK", "application/json", serde_json::to_string(&warehouses).unwrap_or_default()),
@@ -864,8 +1157,50 @@ async fn handle_create_container(pool: &sqlx::PgPool, body: &str) -> (&'static s
         Ok(v) => v,
         Err(e) => return ("400 Bad Request", "application/json", json_error("VALIDATION_ERROR", &format!("Invalid JSON: {e}"))),
     };
+    // ponytail: capacity check — reject if warehouse at planned max
+    if let Some(ref wh) = input.warehouse_name {
+        if let Ok(Some(shipment)) = db::queries::get_shipment(pool, input.shipment_id).await {
+            if let Some(call_id) = shipment.shipping_call_id {
+                match db::queries::check_warehouse_capacity(pool, call_id, wh).await {
+                    Ok((planned, loaded)) if loaded >= planned => {
+                        return ("409 Conflict", "application/json", json_error("CAPACITY_EXCEEDED",
+                            &format!("Warehouse '{wh}' at capacity: {loaded}/{planned} containers loaded")));
+                    }
+                    _ => {} // warehouse not in plan → allow (unplanned), or DB error → let insert fail
+                }
+            }
+        }
+    }
     match db::queries::create_container(pool, &input).await {
         Ok(c) => ("201 Created", "application/json", serde_json::to_string(&c).unwrap_or_default()),
+        Err(e) => ("500 Internal Server Error", "application/json", json_error("DB_ERROR", &e.to_string())),
+    }
+}
+
+// ponytail: delete container — admin-gated
+async fn handle_delete_container(pool: &sqlx::PgPool, id: i64, raw: &str) -> (&'static str, &'static str, String) {
+    if !is_admin(raw) {
+        return ("403 Forbidden", "application/json", json_error("FORBIDDEN", "Only admin can delete containers"));
+    }
+    match db::queries::delete_container(pool, id).await {
+        Ok(true) => ("200 OK", "application/json", r#"{"deleted":true}"#.into()),
+        Ok(false) => ("404 Not Found", "application/json", json_error("NOT_FOUND", &format!("Container {id} not found"))),
+        Err(e) => ("500 Internal Server Error", "application/json", json_error("DB_ERROR", &e.to_string())),
+    }
+}
+
+// ponytail: update container — admin-gated
+async fn handle_update_container(pool: &sqlx::PgPool, id: i64, body: &str, raw: &str) -> (&'static str, &'static str, String) {
+    if !is_admin(raw) {
+        return ("403 Forbidden", "application/json", json_error("FORBIDDEN", "Only admin can update containers"));
+    }
+    let input: db::queries::UpdateContainerInput = match serde_json::from_str(body) {
+        Ok(v) => v,
+        Err(e) => return ("400 Bad Request", "application/json", json_error("VALIDATION_ERROR", &format!("Invalid JSON: {e}"))),
+    };
+    match db::queries::update_container(pool, id, &input).await {
+        Ok(Some(c)) => ("200 OK", "application/json", serde_json::to_string(&c).unwrap_or_default()),
+        Ok(None) => ("404 Not Found", "application/json", json_error("NOT_FOUND", &format!("Container {id} not found"))),
         Err(e) => ("500 Internal Server Error", "application/json", json_error("DB_ERROR", &e.to_string())),
     }
 }

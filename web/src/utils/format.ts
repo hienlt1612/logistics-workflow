@@ -23,10 +23,11 @@ export function fmtDateISO(display: string): string {
   return display; // fallback: return as-is
 }
 
-/** Format currency value to 2 decimal places. null/empty → ''. */
+/** Format currency value with VN locale. null/empty → ''. */
 export function fmtCurrency(val: string | null | undefined): string {
   if (val === null || val === undefined || val === '') return '';
   const n = parseFloat(String(val));
   if (isNaN(n)) return String(val);
-  return n.toFixed(2);
+  // ponytail: VN locale — 1,234.56 → 1.234,56
+  return new Intl.NumberFormat('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
 }

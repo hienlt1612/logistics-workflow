@@ -15,17 +15,21 @@ export const useShipmentsStore = defineStore('shipments', () => {
   const pageSize = ref(20);
   const totalItems = ref(0);
   const totalPages = ref(0);
+  // ponytail: remember last status filter so a bare loadAll() (e.g. after Save)
+  // doesn't clobber the sidebar's active filter into an unfiltered reload.
+  const currentStatus = ref<string | undefined>(undefined);
 
   const selected = computed(() =>
     shipments.value.find((s) => s.id === selectedId.value) ?? null
   );
 
   async function loadAll(statusFilter?: string, page?: number) {
+    if (statusFilter !== undefined) currentStatus.value = statusFilter || undefined;
     loading.value = true;
     error.value = null;
     try {
       const result = await api.fetchShipments({
-        status: statusFilter,
+        status: currentStatus.value,
         page: page ?? currentPage.value,
         pageSize: pageSize.value,
       });

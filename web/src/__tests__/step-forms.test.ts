@@ -87,7 +87,6 @@ describe('Step Form Validation', () => {
 
     it('passes validation when all required fields are filled', async () => {
       setSelected({
-        sc_po_id: 'SC-001',
         buyer_name: 'Buyer Inc.',
         booking_number: 'BK001',
         shipping_line: 'Maersk',
@@ -97,19 +96,20 @@ describe('Step Form Validation', () => {
       const wrapper = mount(Step1Create);
       await flushPromises();
 
+      // Set shipping call selection (not in form, but in component ref)
+      wrapper.vm.selectedCallId = 5;
+
       await wrapper.find('form').trigger('submit.prevent');
       await flushPromises();
 
       expect(mockStore.updateCurrent).toHaveBeenCalled();
       const callArgs = mockStore.updateCurrent.mock.calls[0][0];
-      expect(callArgs.sc_po_id).toBe('SC-001');
       expect(callArgs.buyer_name).toBe('Buyer Inc.');
+      expect(callArgs.shipping_call_id).toBe(5);
     });
 
-    it('uses String(v ?? "").trim() helper — number fields do not throw TypeError', async () => {
-      // Simulate a number being passed as a field value (shouldn't throw)
+    it('rejects when shipping call not selected', async () => {
       setSelected({
-        sc_po_id: 12345 as any,        // number, not string
         buyer_name: 'Buyer',
         booking_number: 'BK001',
         shipping_line: 'Maersk',
@@ -122,13 +122,12 @@ describe('Step Form Validation', () => {
       await wrapper.find('form').trigger('submit.prevent');
       await flushPromises();
 
-      // Should have passed validation - number was coerced to string
-      expect(mockStore.updateCurrent).toHaveBeenCalled();
+      expect(mockStore.updateCurrent).not.toHaveBeenCalled();
+      expect(mockStore.lastToast!.text).toContain('Shipping Call');
     });
 
     it('validates each missing required field individually', async () => {
       setSelected({
-        sc_po_id: 'SC-001',
         buyer_name: 'Buyer',
         booking_number: 'BK001',
         shipping_line: 'Maersk',
@@ -137,6 +136,7 @@ describe('Step Form Validation', () => {
 
       const wrapper = mount(Step1Create);
       await flushPromises();
+      wrapper.vm.selectedCallId = 5; // set call so origin_port check runs
 
       await wrapper.find('form').trigger('submit.prevent');
       await flushPromises();

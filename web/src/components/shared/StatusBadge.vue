@@ -12,6 +12,10 @@ const statusMap: Record<string, string> = {
   CHECKLIST_IN_PROGRESS: 'var(--color-checklist)',
   COMPLETE: 'var(--color-complete)',
   TELEX_RELEASED: 'var(--color-telex)',
+  // ponytail: call status colors
+  OPEN: 'var(--color-manager)',
+  ON_LOADING: 'var(--color-checklist)',
+  CLOSED: '#7f8c8d',
 };
 </script>
 

@@ -2,6 +2,7 @@
 import { onMounted, watch, computed } from 'vue';
 import { useRoute } from 'vue-router';
 import { useShipmentsStore } from '@/stores/shipments';
+import * as api from '@/api/client';
 import WorkflowProgress from '@/components/workflow/WorkflowProgress.vue';
 import Step1Create from '@/components/workflow/Step1Create.vue';
 import Step2Draft from '@/components/workflow/Step2Draft.vue';
@@ -18,16 +19,30 @@ const currentStatusIdx = computed(() => {
   return statusOrder.indexOf(store.selected.status);
 });
 
-onMounted(() => store.loadAll());
+// ponytail: paginated list may not hold this shipment (older ones past page 1) —
+// fetch it directly so store.select resolves instead of "Select a shipment".
+async function ensureSelected(id: number) {
+  if (!store.shipments.find((s) => s.id === id)) {
+    try { store.shipments.push(await api.fetchShipment(id)); } catch { /* not found */ }
+  }
+  store.select(id);
+}
+
+onMounted(async () => {
+  await store.loadAll();
+  const id = Number(route.params.id);
+  if (id) await ensureSelected(id);
+});
 
 watch(
   () => route.params.id,
-  (id) => { if (id) store.select(Number(id)); },
-  { immediate: true }
+  async (id) => { if (id) await ensureSelected(Number(id)); },
 );
 
-function onSaved() {
-  store.loadAll();
+async function onSaved() {
+  await store.loadAll();
+  const id = Number(route.params.id);
+  if (id) await ensureSelected(id); // keep selection after reload drops it off page 1
 }
 </script>
 

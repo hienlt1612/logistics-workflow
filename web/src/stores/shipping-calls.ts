@@ -52,5 +52,20 @@ export const useShippingCallsStore = defineStore('shippingCalls', () => {
     }
   }
 
-  return { calls, selected, warehouses, loading, error, loadAll, loadOne, create };
+  async function update(id: number, data: Partial<api.CreateShippingCallInput>): Promise<api.ShippingCall | null> {
+    loading.value = true;
+    error.value = null;
+    try {
+      const c = await api.updateShippingCall(id, data);
+      selected.value = c;
+      return c;
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : 'Failed to update call';
+      return null;
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  return { calls, selected, warehouses, loading, error, loadAll, loadOne, create, update };
 });

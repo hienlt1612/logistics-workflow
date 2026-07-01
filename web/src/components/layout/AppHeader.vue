@@ -9,10 +9,11 @@ const route = useRoute();
 const auth = useAuthStore();
 const exporting = ref(false);
 
+// ponytail: top nav ordered by operations flow — Dashboard → Calls → Shipments
 const links = [
-  { to: '/', label: 'Dashboard' },
-  { to: '/workflow', label: 'Workflow' },
-  { to: '/export', label: 'Export' },
+  { to: '/', label: '📊 Dashboard' },
+  { to: '/calls', label: '🚢 Shipping Calls' },
+  { to: '/shipments', label: '📋 Shipments' },
 ];
 
 function isActive(path: string): boolean {
@@ -123,6 +124,18 @@ function handleLogout() {
   font-weight: 600;
   transition: opacity 0.2s;
 }
+.new-call-btn {
+  background: var(--color-manager);
+  color: var(--text-inverse);
+  border: none;
+  padding: var(--space-xs) var(--space-md);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.new-call-btn:hover { opacity: 0.9; }
 .export-btn:hover { opacity: 0.9; }
 .export-btn:disabled { opacity: 0.5; }
 

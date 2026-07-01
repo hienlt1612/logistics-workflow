@@ -11,6 +11,10 @@ export const useDashboardStore = defineStore('dashboard', () => {
     customs: 0,
     checklist: 0,
     telex: 0,
+    calls_total: 0,
+    calls_open: 0,
+    calls_loading: 0,
+    calls_closed: 0,
   });
   const loading = ref(false);
   const error = ref<string | null>(null);

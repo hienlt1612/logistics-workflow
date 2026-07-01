@@ -10,7 +10,18 @@ pub async fn ensure_schema(pool: &PgPool) -> Result<(), sqlx::Error> {
     sqlx::query("ALTER TABLE shipments ADD COLUMN IF NOT EXISTS shipping_call_id BIGINT REFERENCES shipping_calls(id) ON DELETE SET NULL").execute(pool).await?;
     sqlx::query("ALTER TABLE shipments ADD COLUMN IF NOT EXISTS container_number VARCHAR(20)").execute(pool).await?;
     sqlx::query("ALTER TABLE shipments ADD COLUMN IF NOT EXISTS seal_number VARCHAR(20)").execute(pool).await?;
+    sqlx::query("ALTER TABLE shipments ADD COLUMN IF NOT EXISTS containers_loaded BOOLEAN NOT NULL DEFAULT false").execute(pool).await?;
+    // ponytail: containers — drop weight/cbm, add loaded_date
+    sqlx::query("ALTER TABLE containers DROP COLUMN IF EXISTS weight_kg").execute(pool).await?;
+    sqlx::query("ALTER TABLE containers DROP COLUMN IF EXISTS cbm").execute(pool).await?;
+    sqlx::query("ALTER TABLE containers ADD COLUMN IF NOT EXISTS loaded_date DATE").execute(pool).await?;
     log::info!("Database schema verified");
+
+    // ponytail: retroactive sync — existing calls need status recalculated
+    sqlx::query(
+        "UPDATE shipping_calls SET status = CASE WHEN (SELECT COUNT(*) FROM shipments WHERE shipping_call_id = shipping_calls.id) > 0 THEN 'ON_LOADING' ELSE 'OPEN' END WHERE status NOT IN ('CLOSED');"
+    ).execute(pool).await?;
+
     Ok(())
 }
 
@@ -85,7 +96,8 @@ CREATE TABLE IF NOT EXISTS shipments (
     originals_description VARCHAR(256),
     telex_released  BOOLEAN NOT NULL DEFAULT false,
     payment_received BOOLEAN NOT NULL DEFAULT false,
-    shipping_call_id BIGINT REFERENCES shipping_calls(id) ON DELETE SET NULL
+    shipping_call_id BIGINT REFERENCES shipping_calls(id) ON DELETE SET NULL,
+    containers_loaded BOOLEAN NOT NULL DEFAULT false
 );
 "#;
 
@@ -96,8 +108,7 @@ CREATE TABLE IF NOT EXISTS containers (
     container_number  VARCHAR(20) NOT NULL,
     seal_number       VARCHAR(20),
     warehouse_name    VARCHAR(120),
-    weight_kg         NUMERIC(10,2),
-    cbm               NUMERIC(8,3),
+    loaded_date       DATE,
     status            VARCHAR(20) DEFAULT 'PENDING',
     notes             TEXT
 );

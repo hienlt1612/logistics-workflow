@@ -62,6 +62,7 @@ export interface Shipment {
   telex_released: boolean;
   payment_received: boolean;
   shipping_call_id: number | null;
+  containers_loaded: boolean;
 }
 
 export interface DashboardStats {
@@ -71,6 +72,10 @@ export interface DashboardStats {
   customs: number;
   checklist: number;
   telex: number;
+  calls_total: number;
+  calls_open: number;
+  calls_loading: number;
+  calls_closed: number;
 }
 
 export interface CreateShipmentInput {
@@ -83,6 +88,7 @@ export interface CreateShipmentInput {
   origin_port?: string;
   warehouse_loc?: string;
   loading_plan?: string;
+  shipping_call_id?: number;
 }
 
 export interface PaginatedShipments {
@@ -248,8 +254,7 @@ export interface Container {
   container_number: string;
   seal_number: string | null;
   warehouse_name: string | null;
-  weight_kg: string | null;
-  cbm: string | null;
+  loaded_date: string | null;
   status: string;
   notes: string | null;
 }
@@ -263,6 +268,7 @@ export interface CreateShippingCallInput {
   product_description?: string;
   total_containers: number;
   warehouses?: { warehouse_name: string; planned_containers: number }[];
+  status?: string;
 }
 
 export interface CreateContainerInput {
@@ -270,8 +276,7 @@ export interface CreateContainerInput {
   container_number: string;
   seal_number?: string;
   warehouse_name?: string;
-  weight_kg?: string;
-  cbm?: string;
+  loaded_date?: string;
 }
 
 export async function fetchShippingCalls(): Promise<ShippingCall[]> {
@@ -286,6 +291,14 @@ export async function createShippingCall(data: CreateShippingCallInput): Promise
   return request('/api/shipping-calls', { method: 'POST', body: JSON.stringify(data) });
 }
 
+export async function updateShippingCall(id: number, data: Partial<CreateShippingCallInput>): Promise<ShippingCall> {
+  return request(`/api/shipping-calls/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+}
+
+export async function deleteShippingCall(id: number): Promise<void> {
+  await fetch(`${BASE}/api/shipping-calls/${id}`, { method: 'DELETE', headers: authHeader() });
+}
+
 export async function fetchCallWarehouses(callId: number): Promise<CallWarehouse[]> {
   return request(`/api/shipping-calls/${callId}/warehouses`);
 }
@@ -296,4 +309,12 @@ export async function fetchContainers(shipmentId: number): Promise<Container[]> 
 
 export async function createContainer(data: CreateContainerInput): Promise<Container> {
   return request('/api/containers', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function deleteContainer(id: number): Promise<void> {
+  await fetch(`${BASE}/api/containers/${id}`, { method: 'DELETE', headers: authHeader() });
+}
+
+export async function updateContainer(id: number, data: Partial<CreateContainerInput>): Promise<Container> {
+  return request(`/api/containers/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
 }

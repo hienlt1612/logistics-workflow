@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue';
+import { ref, watch, computed, onMounted } from 'vue';
 import type { Shipment } from '@/api/client';
 import { useShipmentsStore } from '@/stores/shipments';
+import * as api from '@/api/client';
 
 const store = useShipmentsStore();
 const emit = defineEmits<{ saved: [] }>();
@@ -12,6 +13,8 @@ const form = ref({
   customs_status: '',
 });
 
+const containerCount = ref(0);
+const callTotal = ref(0);
 const saving = ref(false);
 const isReadOnly = computed(() => store.selected?.telex_released ?? false);
 
@@ -28,6 +31,19 @@ watch(
   },
   { immediate: true }
 );
+
+// ponytail: fetch container count + linked call total
+onMounted(async () => {
+  if (store.selectedId) {
+    try { containerCount.value = (await api.fetchContainers(store.selectedId)).length; }
+    catch { containerCount.value = 0; }
+  }
+  const callId = store.selected?.shipping_call_id;
+  if (callId) {
+    try { const c = await api.fetchShippingCall(callId); callTotal.value = c.total_containers; }
+    catch { callTotal.value = 0; }
+  }
+});
 
 function validate(): boolean {
   const t = (v: unknown) => String(v ?? '').trim();
@@ -52,6 +68,14 @@ async function handleSave() {
       <h2>STEP 3: CUSTOMS CLEARANCE</h2>
       <span class="role-badge acct-bg">ACCOUNTING</span>
       <span v-if="isReadOnly" class="locked-badge">🔒 READ-ONLY</span>
+    </div>
+
+    <!-- ponytail: container loaded count -->
+    <div class="checklist-section">
+      <span class="loaded-info">
+        {{ containerCount }} / {{ callTotal }} containers loaded
+        <span v-if="store.selected?.containers_loaded" class="loaded-ok">✓</span>
+      </span>
     </div>
 
     <div class="form-grid">
@@ -125,4 +149,6 @@ async function handleSave() {
 }
 .btn-primary:hover { opacity: 0.9; }
 .btn-primary:disabled { opacity: 0.5; }
+.checklist-section { padding: var(--space-sm) var(--space-lg); }
+.loaded-info { font-size: var(--text-sm); color: var(--text-secondary); }
 </style>

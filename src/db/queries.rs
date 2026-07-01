@@ -45,6 +45,7 @@ pub struct Shipment {
     pub telex_released: bool,
     pub payment_received: bool,
     pub shipping_call_id: Option<i64>,
+    pub containers_loaded: bool,
 }
 
 // ponytail: 1 row = 1 container. COUNT(*) on containers table = loaded count.
@@ -55,8 +56,7 @@ pub struct Container {
     pub container_number: String,
     pub seal_number: Option<String>,
     pub warehouse_name: Option<String>,
-    pub weight_kg: Option<BigDecimal>,
-    pub cbm: Option<BigDecimal>,
+    pub loaded_date: Option<NaiveDate>,
     pub status: String,
     pub notes: Option<String>,
 }
@@ -107,11 +107,22 @@ pub struct CreateShipmentInput {
     pub origin_port: Option<String>,
     pub warehouse_loc: Option<String>,
     pub loading_plan: Option<String>,
+    pub shipping_call_id: Option<i64>,
 }
 
 pub async fn list_shipments(pool: &PgPool) -> Result<Vec<Shipment>, sqlx::Error> {
     sqlx::query_as::<_, Shipment>("SELECT * FROM shipments ORDER BY created_at DESC")
         .fetch_all(pool).await
+}
+
+// ponytail: one grouped query instead of N list_containers calls for the report
+pub async fn count_containers_by_shipment(
+    pool: &PgPool,
+) -> Result<std::collections::HashMap<i64, i64>, sqlx::Error> {
+    let rows: Vec<(i64, i64)> = sqlx::query_as(
+        "SELECT shipment_id, COUNT(*)::int8 FROM containers GROUP BY shipment_id",
+    ).fetch_all(pool).await?;
+    Ok(rows.into_iter().collect())
 }
 
 pub async fn list_shipments_paginated(
@@ -170,15 +181,15 @@ pub async fn create_shipment(
     let row: (i64,) = sqlx::query_as(
         r#"INSERT INTO shipments (
             shipment_ref, sc_po_id, sc_po_date, sc_po_by, buyer_name,
-            booking_number, shipping_line, origin_port, warehouse_loc, loading_plan
+            booking_number, shipping_line, origin_port, warehouse_loc, loading_plan, shipping_call_id
         ) VALUES ($1, $2, CASE WHEN $3 = '' THEN NULL ELSE $3::date END,
-            $4, $5, $6, $7, $8, $9, $10)
+            $4, $5, $6, $7, $8, $9, $10, $11)
         RETURNING id"#
     )
     .bind(&ref_num).bind(&input.sc_po_id).bind(&input.sc_po_date)
     .bind(&input.sc_po_by).bind(&input.buyer_name).bind(&input.booking_number)
     .bind(&input.shipping_line).bind(&input.origin_port).bind(&input.warehouse_loc)
-    .bind(&input.loading_plan)
+    .bind(&input.loading_plan).bind(input.shipping_call_id)
     .fetch_one(pool)
     .await?;
     log::info!("Created shipment {} (id={})", ref_num, row.0);
@@ -197,7 +208,7 @@ pub async fn update_shipment_fields(
         "customs_date","customs_number","customs_status",
         "bl_received","charges_paid","co_received","phyto_received","docs_confirmed",
         "prepayment_date","prepayment_amt","remaining_amt",
-        "originals_status","originals_sent","originals_description","telex_released","status","payment_received",
+        "originals_status","originals_sent","originals_description","telex_released","status","payment_received","shipping_call_id","containers_loaded",
     ];
     let mut sets = Vec::new();
     for (col, _) in fields {
@@ -211,6 +222,13 @@ pub async fn update_shipment_fields(
         if col == "telex_released" && fields[col].as_bool() == Some(true) {
             sets.push(format!("status = ${idx}")); idx += 1;
         }
+        // ponytail: invariant telex_released ⟺ status=TELEX_RELEASED. Setting
+        // status to anything else (a revert) must clear the telex flag, unless
+        // the caller sets telex_released explicitly in the same payload.
+        if col == "status" && fields[col].as_str() != Some("TELEX_RELEASED")
+            && !fields.contains_key("telex_released") {
+            sets.push(format!("telex_released = ${idx}")); idx += 1;
+        }
     }
     sets.push(format!("updated_at = ${idx}")); idx += 1;
     let sql = format!(
@@ -220,7 +238,7 @@ pub async fn update_shipment_fields(
     let mut query = sqlx::query_as::<_, Shipment>(&sql);
     for (col, val) in fields {
         match col.as_str() {
-            "bl_received"|"charges_paid"|"co_received"|"phyto_received"|"docs_confirmed"|"telex_released"|"payment_received" => {
+            "bl_received"|"charges_paid"|"co_received"|"phyto_received"|"docs_confirmed"|"telex_released"|"payment_received"|"containers_loaded" => {
                 query = query.bind(val.as_bool().unwrap_or(false));
                 if col == "telex_released" && val.as_bool() == Some(true) {
                     query = query.bind("TELEX_RELEASED");
@@ -236,6 +254,15 @@ pub async fn update_shipment_fields(
                 let s = val.as_str().unwrap_or("");
                 let d: Option<chrono::NaiveDate> = if s.is_empty() { None } else { s.parse().ok() };
                 query = query.bind(d);
+            }
+            "shipping_call_id" => {
+                query = query.bind(val.as_i64());
+            }
+            "status" => {
+                query = query.bind(val.as_str());
+                if val.as_str() != Some("TELEX_RELEASED") && !fields.contains_key("telex_released") {
+                    query = query.bind(false); // clear telex flag on status regression
+                }
             }
             _ => { query = query.bind(val.as_str()); }
         }
@@ -295,7 +322,7 @@ pub async fn authenticate_user(pool: &PgPool, username: &str, password: &str) ->
 
 pub async fn set_checklist_bool(pool: &PgPool, id: i64, field: &str, value: bool) -> Result<Shipment, sqlx::Error> {
     let col = match field {
-        "bl_received"|"charges_paid"|"co_received"|"phyto_received"|"docs_confirmed"|"telex_released"|"payment_received" => field,
+        "bl_received"|"charges_paid"|"co_received"|"phyto_received"|"docs_confirmed"|"telex_released"|"payment_received"|"containers_loaded" => field,
         _ => return Err(sqlx::Error::Protocol(format!("Invalid: {field}"))),
     };
     let mut sql = format!("UPDATE shipments SET {col} = $1, updated_at = NOW()");
@@ -337,11 +364,53 @@ pub async fn create_shipping_call(pool: &PgPool, call: &CreateShippingCallInput)
     get_shipping_call(pool, row.0).await.map(|s| s.expect("just inserted"))
 }
 
+// ponytail: update editable fields only — buyer, incoterms, product, sc_po, total_containers
+pub async fn update_shipping_call(pool: &PgPool, id: i64, input: &UpdateShippingCallInput) -> Result<Option<ShippingCall>, sqlx::Error> {
+    sqlx::query(
+        "UPDATE shipping_calls SET sc_po_id=$1, sc_po_date=CASE WHEN $2='' THEN NULL ELSE $2::date END, sc_po_by=$3, buyer_name=$4, incoterms=$5, product_description=$6, total_containers=$7, status=COALESCE($9, status), updated_at=NOW() WHERE id=$8"
+    ).bind(&input.sc_po_id).bind(&input.sc_po_date).bind(&input.sc_po_by)
+     .bind(&input.buyer_name).bind(&input.incoterms).bind(&input.product_description)
+     .bind(input.total_containers).bind(id).bind(&input.status)
+     .execute(pool).await?;
+    get_shipping_call(pool, id).await
+}
+
+// ponytail: delete call — shipments set to NULL (ON DELETE SET NULL), warehouses cascade
+pub async fn delete_shipping_call(pool: &PgPool, id: i64) -> Result<bool, sqlx::Error> {
+    let r = sqlx::query("DELETE FROM shipping_calls WHERE id = $1").bind(id).execute(pool).await?;
+    Ok(r.rows_affected() > 0)
+}
+
+// ponytail: sync call status based on linked shipment count
+pub async fn sync_call_status(pool: &PgPool, call_id: i64) -> Result<(), sqlx::Error> {
+    let (count,): (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM shipments WHERE shipping_call_id = $1"
+    ).bind(call_id).fetch_one(pool).await?;
+    let new_status = if count > 0 { "ON_LOADING" } else { "OPEN" };
+    sqlx::query(
+        "UPDATE shipping_calls SET status = $1, updated_at = NOW() WHERE id = $2 AND status NOT IN ('CLOSED')"
+    ).bind(new_status).bind(call_id).execute(pool).await?;
+    Ok(())
+}
+
 // ── Call Warehouses ──
 
 pub async fn list_call_warehouses(pool: &PgPool, call_id: i64) -> Result<Vec<CallWarehouse>, sqlx::Error> {
-    sqlx::query_as::<_, CallWarehouse>("SELECT * FROM call_warehouses WHERE shipping_call_id = $1 ORDER BY id")
-        .bind(call_id).fetch_all(pool).await
+    // ponytail: compute loaded_containers dynamically from containers table
+    sqlx::query_as::<_, CallWarehouse>(
+        "SELECT cw.id, cw.shipping_call_id, cw.warehouse_name, cw.planned_containers,
+                COALESCE(ct.loaded, 0)::int as loaded_containers, cw.status, cw.notes
+         FROM call_warehouses cw
+         LEFT JOIN (
+             SELECT c.warehouse_name, COUNT(*) as loaded
+             FROM containers c
+             JOIN shipments s ON s.id = c.shipment_id
+             WHERE s.shipping_call_id = $1
+             GROUP BY c.warehouse_name
+         ) ct ON ct.warehouse_name = cw.warehouse_name
+         WHERE cw.shipping_call_id = $1
+         ORDER BY cw.id"
+    ).bind(call_id).fetch_all(pool).await
 }
 
 pub async fn create_call_warehouse(pool: &PgPool, w: &CreateWarehouseInput) -> Result<CallWarehouse, sqlx::Error> {
@@ -349,6 +418,28 @@ pub async fn create_call_warehouse(pool: &PgPool, w: &CreateWarehouseInput) -> R
         "INSERT INTO call_warehouses (shipping_call_id, warehouse_name, planned_containers) VALUES ($1,$2,$3) RETURNING *"
     ).bind(w.shipping_call_id).bind(&w.warehouse_name).bind(w.planned_containers)
      .fetch_one(pool).await
+}
+
+// ponytail: delete all warehouses for a call (used in update to replace atomically)
+pub async fn delete_call_warehouses(pool: &PgPool, call_id: i64) -> Result<u64, sqlx::Error> {
+    sqlx::query("DELETE FROM call_warehouses WHERE shipping_call_id = $1")
+        .bind(call_id).execute(pool).await.map(|r| r.rows_affected())
+}
+
+// ponytail: check warehouse capacity for a call — reject if loaded >= planned
+pub async fn check_warehouse_capacity(pool: &PgPool, call_id: i64, warehouse_name: &str) -> Result<(i32, i32), sqlx::Error> {
+    let row: (i32, i32) = sqlx::query_as(
+        "SELECT cw.planned_containers, COALESCE(ct.loaded, 0)::int
+         FROM call_warehouses cw
+         LEFT JOIN (
+             SELECT c.warehouse_name, COUNT(*) as loaded
+             FROM containers c JOIN shipments s ON s.id = c.shipment_id
+             WHERE s.shipping_call_id = $1 AND c.warehouse_name = $2
+             GROUP BY c.warehouse_name
+         ) ct ON ct.warehouse_name = cw.warehouse_name
+         WHERE cw.shipping_call_id = $1 AND cw.warehouse_name = $2"
+    ).bind(call_id).bind(warehouse_name).fetch_one(pool).await?;
+    Ok(row)
 }
 
 // ── Containers ──
@@ -360,10 +451,25 @@ pub async fn list_containers(pool: &PgPool, shipment_id: i64) -> Result<Vec<Cont
 
 pub async fn create_container(pool: &PgPool, c: &CreateContainerInput) -> Result<Container, sqlx::Error> {
     sqlx::query_as::<_, Container>(
-        "INSERT INTO containers (shipment_id, container_number, seal_number, warehouse_name, weight_kg, cbm) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *"
+        "INSERT INTO containers (shipment_id, container_number, seal_number, warehouse_name, loaded_date) VALUES ($1,$2,$3,$4,$5::date) RETURNING *"
     ).bind(c.shipment_id).bind(&c.container_number).bind(&c.seal_number)
-     .bind(&c.warehouse_name).bind(c.weight_kg.clone()).bind(c.cbm.clone())
+     .bind(&c.warehouse_name).bind(&c.loaded_date)
      .fetch_one(pool).await
+}
+
+// ponytail: delete + update — same pattern as call warehouses
+pub async fn delete_container(pool: &PgPool, id: i64) -> Result<bool, sqlx::Error> {
+    let r = sqlx::query("DELETE FROM containers WHERE id = $1").bind(id).execute(pool).await?;
+    Ok(r.rows_affected() > 0)
+}
+
+pub async fn update_container(pool: &PgPool, id: i64, c: &UpdateContainerInput) -> Result<Option<Container>, sqlx::Error> {
+    sqlx::query(
+        "UPDATE containers SET container_number=$1, seal_number=$2, warehouse_name=$3, loaded_date=$4::date WHERE id=$5"
+    ).bind(&c.container_number).bind(&c.seal_number).bind(&c.warehouse_name)
+     .bind(&c.loaded_date).bind(id)
+     .execute(pool).await?;
+    sqlx::query_as::<_, Container>("SELECT * FROM containers WHERE id = $1").bind(id).fetch_optional(pool).await
 }
 
 // ── Input structs ──
@@ -388,6 +494,20 @@ pub struct InlineWarehouse {
     pub planned_containers: i32,
 }
 
+// ponytail: UpdateShippingCallInput — editable fields + optional warehouse replace
+#[derive(Debug, Deserialize)]
+pub struct UpdateShippingCallInput {
+    pub sc_po_id: Option<String>,
+    pub sc_po_date: Option<String>,
+    pub sc_po_by: Option<String>,
+    pub buyer_name: String,
+    pub incoterms: String,
+    pub product_description: Option<String>,
+    pub total_containers: i32,
+    pub warehouses: Option<Vec<InlineWarehouse>>,
+    pub status: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CreateWarehouseInput {
     pub shipping_call_id: i64,
@@ -401,6 +521,14 @@ pub struct CreateContainerInput {
     pub container_number: String,
     pub seal_number: Option<String>,
     pub warehouse_name: Option<String>,
-    pub weight_kg: Option<BigDecimal>,
-    pub cbm: Option<BigDecimal>,
+    pub loaded_date: Option<String>,
+}
+
+// ponytail: update — same fields without shipment_id (immutable)
+#[derive(Debug, Deserialize)]
+pub struct UpdateContainerInput {
+    pub container_number: String,
+    pub seal_number: Option<String>,
+    pub warehouse_name: Option<String>,
+    pub loaded_date: Option<String>,
 }

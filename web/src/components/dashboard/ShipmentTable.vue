@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import type { Shipment } from '@/api/client';
 import StatusBadge from '@/components/shared/StatusBadge.vue';
+import { fmtDateDisplay } from '@/utils/format';
 
 defineProps<{
   shipments: Shipment[];
 }>();
 
 function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleDateString();
+  return fmtDateDisplay(iso);
 }
 </script>
 

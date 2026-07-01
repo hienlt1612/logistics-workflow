@@ -5,9 +5,9 @@ import type { Shipment } from '@/api/client';
 
 // Create mock shipments data
 const mockShipments: Shipment[] = [
-  { id: 1, shipment_ref: 'SHIP-001', status: 'DRAFT', buyer_name: 'Alpha Corp', created_at: '', updated_at: '', sc_po_id: null, sc_po_date: null, sc_po_by: null, booking_number: null, shipping_line: null, origin_port: null, warehouse_loc: null, loading_plan: null, shipper_name: null, consignee_name: null, etd: null, invoice_number: null, invoice_date: null, total_value_usd: null, drafts_date: null, bill_of_lading: null, customs_date: null, customs_number: null, customs_status: null, bl_received: false, charges_paid: false, co_received: false, phyto_received: false, docs_confirmed: false, prepayment_date: null, prepayment_amt: null, remaining_amt: null, originals_status: null, originals_sent: null, originals_description: null, telex_released: false, payment_received: false },
-  { id: 2, shipment_ref: 'SHIP-002', status: 'DOCUMENTS_READY', buyer_name: 'Beta Ltd', created_at: '', updated_at: '', sc_po_id: null, sc_po_date: null, sc_po_by: null, booking_number: null, shipping_line: null, origin_port: null, warehouse_loc: null, loading_plan: null, shipper_name: null, consignee_name: null, etd: null, invoice_number: null, invoice_date: null, total_value_usd: null, drafts_date: null, bill_of_lading: null, customs_date: null, customs_number: null, customs_status: null, bl_received: false, charges_paid: false, co_received: false, phyto_received: false, docs_confirmed: false, prepayment_date: null, prepayment_amt: null, remaining_amt: null, originals_status: null, originals_sent: null, originals_description: null, telex_released: false, payment_received: false },
-  { id: 3, shipment_ref: 'SHIP-003', status: 'CUSTOMS_CLEARED', buyer_name: 'Gamma Inc', created_at: '', updated_at: '', sc_po_id: null, sc_po_date: null, sc_po_by: null, booking_number: null, shipping_line: null, origin_port: null, warehouse_loc: null, loading_plan: null, shipper_name: null, consignee_name: null, etd: null, invoice_number: null, invoice_date: null, total_value_usd: null, drafts_date: null, bill_of_lading: null, customs_date: null, customs_number: null, customs_status: null, bl_received: false, charges_paid: false, co_received: false, phyto_received: false, docs_confirmed: false, prepayment_date: null, prepayment_amt: null, remaining_amt: null, originals_status: null, originals_sent: null, originals_description: null, telex_released: false, payment_received: false },
+  { id: 1, shipment_ref: 'SHIP-001', status: 'DRAFT', buyer_name: 'Alpha Corp', created_at: '', updated_at: '', sc_po_id: null, sc_po_date: null, sc_po_by: null, booking_number: 'BK-001', shipping_line: null, origin_port: null, warehouse_loc: null, loading_plan: null, shipper_name: null, consignee_name: null, etd: null, invoice_number: null, invoice_date: null, total_value_usd: null, drafts_date: null, bill_of_lading: null, customs_date: null, customs_number: null, customs_status: null, bl_received: false, charges_paid: false, co_received: false, phyto_received: false, docs_confirmed: false, prepayment_date: null, prepayment_amt: null, remaining_amt: null, originals_status: null, originals_sent: null, originals_description: null, telex_released: false, payment_received: false },
+  { id: 2, shipment_ref: 'SHIP-002', status: 'DRAFT', buyer_name: 'Beta Ltd', created_at: '', updated_at: '', sc_po_id: null, sc_po_date: null, sc_po_by: null, booking_number: 'BK-002', shipping_line: null, origin_port: null, warehouse_loc: null, loading_plan: null, shipper_name: null, consignee_name: null, etd: null, invoice_number: null, invoice_date: null, total_value_usd: null, drafts_date: null, bill_of_lading: null, customs_date: null, customs_number: null, customs_status: null, bl_received: false, charges_paid: false, co_received: false, phyto_received: false, docs_confirmed: false, prepayment_date: null, prepayment_amt: null, remaining_amt: null, originals_status: null, originals_sent: null, originals_description: null, telex_released: false, payment_received: false },
+  { id: 3, shipment_ref: 'SHIP-003', status: 'DRAFT', buyer_name: 'Gamma Inc', created_at: '', updated_at: '', sc_po_id: null, sc_po_date: null, sc_po_by: null, booking_number: 'BK-003', shipping_line: null, origin_port: null, warehouse_loc: null, loading_plan: null, shipper_name: null, consignee_name: null, etd: null, invoice_number: null, invoice_date: null, total_value_usd: null, drafts_date: null, bill_of_lading: null, customs_date: null, customs_number: null, customs_status: null, bl_received: false, charges_paid: false, co_received: false, phyto_received: false, docs_confirmed: false, prepayment_date: null, prepayment_amt: null, remaining_amt: null, originals_status: null, originals_sent: null, originals_description: null, telex_released: false, payment_received: false },
 ];
 
 let mockShipmentStore: any;
@@ -22,6 +22,16 @@ vi.mock('@/stores/auth', () => ({
   useAuthStore: () => mockAuthStore,
 }));
 
+// ponytail: sidebar now uses shipping-calls store for context-sensitive call list
+vi.mock('@/stores/shipping-calls', () => ({
+  useShippingCallsStore: () => ({
+    calls: [],
+    loading: false,
+    loadAll: vi.fn(),
+    loadOne: vi.fn(),
+  }),
+}));
+
 // Mock router
 const mockPush = vi.fn();
 vi.mock('vue-router', () => ({
@@ -29,7 +39,7 @@ vi.mock('vue-router', () => ({
     push: mockPush,
   }),
   useRoute: () => ({
-    path: '/',
+    path: '/shipments', // ponytail: not / (dashboard), sidebar visible
   }),
 }));
 
@@ -79,9 +89,9 @@ describe('AppSidebar', () => {
     const wrapper = mount(AppSidebar);
     const rows = wrapper.findAll('.shipment-row');
     expect(rows).toHaveLength(3);
-    expect(wrapper.text()).toContain('SHIP-001');
-    expect(wrapper.text()).toContain('SHIP-002');
-    expect(wrapper.text()).toContain('SHIP-003');
+    expect(wrapper.text()).toContain('BK-001');
+    expect(wrapper.text()).toContain('BK-002');
+    expect(wrapper.text()).toContain('BK-003');
   });
 
   it('search filters shipments by ref or buyer name', async () => {
@@ -92,7 +102,7 @@ describe('AppSidebar', () => {
 
     const rows = wrapper.findAll('.shipment-row');
     expect(rows).toHaveLength(1);
-    expect(rows[0].text()).toContain('SHIP-001');
+    expect(rows[0].text()).toContain('BK-001');
   });
 
   it('search filters by buyer name', async () => {
@@ -103,7 +113,7 @@ describe('AppSidebar', () => {
 
     const rows = wrapper.findAll('.shipment-row');
     expect(rows).toHaveLength(1);
-    expect(rows[0].text()).toContain('SHIP-002');
+    expect(rows[0].text()).toContain('BK-002');
   });
 
   it('status dropdown filters by status', async () => {
@@ -156,9 +166,12 @@ describe('AppSidebar', () => {
     expect(wrapper.find('.pagination').exists()).toBe(false);
   });
 
-  it('shows empty message when no shipments', () => {
+  it('shows empty message when no shipments', async () => {
     mockShipmentStore.shipments = [];
     const wrapper = mount(AppSidebar);
+    // default filter is DRAFT; clear it to reach the true-empty message
+    await wrapper.find('.status-filter').setValue('');
+    await flushPromises();
 
     expect(wrapper.find('.empty-list').exists()).toBe(true);
     expect(wrapper.text()).toContain('No shipments yet');

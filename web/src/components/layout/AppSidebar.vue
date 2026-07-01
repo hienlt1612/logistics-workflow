@@ -1,17 +1,53 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { computed, ref, onMounted } from 'vue';
+import { useRouter, useRoute } from 'vue-router';
 import { useShipmentsStore } from '@/stores/shipments';
+import { useShippingCallsStore } from '@/stores/shipping-calls';
 import { useAuthStore } from '@/stores/auth';
 import StatusBadge from '@/components/shared/StatusBadge.vue';
 
 const store = useShipmentsStore();
+const callStore = useShippingCallsStore();
 const auth = useAuthStore();
 const router = useRouter();
+const route = useRoute();
 const search = ref('');
-const statusFilter = ref('');
+const statusFilter = ref('DRAFT'); // ponytail: sidebar default filter = Draft
 const selectedIds = ref<Set<number>>(new Set());
 const batchStatus = ref('');
+
+// ponytail: context-sensitive sidebar — show calls on /calls page, shipments elsewhere
+const isCallsPage = computed(() => route.path.startsWith('/calls'));
+
+// Call-specific state (scoped to /calls page)
+const callSearch = ref('');
+const callStatusFilter = ref('ON_LOADING'); // ponytail: sidebar default filter = On Loading
+const callStatusOptions = [
+  { value: '', label: 'All Statuses' },
+  { value: 'OPEN', label: 'Open' },
+  { value: 'ON_LOADING', label: 'On Loading' },
+  { value: 'CLOSED', label: 'Closed' },
+];
+
+const filteredCalls = computed(() => {
+  const q = callSearch.value.toLowerCase();
+  let list = callStore.calls;
+  if (q) {
+    list = list.filter(c =>
+      c.call_ref.toLowerCase().includes(q) ||
+      c.buyer_name.toLowerCase().includes(q)
+    );
+  }
+  if (callStatusFilter.value) {
+    list = list.filter(c => c.status === callStatusFilter.value);
+  }
+  return list;
+});
+
+onMounted(() => {
+  if (isCallsPage.value) callStore.loadAll();
+  else store.loadAll(statusFilter.value || undefined);
+});
 
 const statusOptions = [
   { value: '', label: 'All Statuses' },
@@ -33,7 +69,7 @@ const filtered = computed(() => {
   if (q) {
     list = list.filter(
       (s) =>
-        s.shipment_ref.toLowerCase().includes(q) ||
+        (s.booking_number ?? '').toLowerCase().includes(q) ||
         (s.buyer_name ?? '').toLowerCase().includes(q)
     );
   }
@@ -100,12 +136,9 @@ async function handleBatchApply() {
 </script>
 
 <template>
-  <aside class="sidebar">
-    <div class="sidebar-nav">
-      <router-link to="/" class="nav-link">Dashboard</router-link>
-      <router-link to="/calls" class="nav-link">Shipping Calls</router-link>
-    </div>
-    <div class="sidebar-actions">
+  <aside class="sidebar" v-if="route.path !== '/'">
+    <!-- Shipment controls — hidden on /calls page -->
+    <div v-if="!isCallsPage" class="sidebar-actions">
       <button class="btn-new" @click="handleNew" :disabled="store.loading">
         + New Shipment
       </button>
@@ -121,13 +154,13 @@ async function handleBatchApply() {
       <input
         v-model="search"
         type="search"
-        placeholder="Search ref or buyer..."
+        placeholder="Search booking # or buyer..."
         class="search-input"
       />
     </div>
 
-    <!-- Batch action bar -->
-    <div v-if="selectCount > 0" class="batch-bar">
+    <!-- Batch action bar — shipment only -->
+    <div v-if="!isCallsPage && selectCount > 0" class="batch-bar">
       <span class="batch-count">{{ selectCount }} selected</span>
       <select v-model="batchStatus" class="batch-status-select">
         <option v-for="opt in batchStatusOptions" :key="opt.value" :value="opt.value">
@@ -143,17 +176,48 @@ async function handleBatchApply() {
       </button>
     </div>
 
-    <div class="shipment-list" v-if="filtered.length">
-      <!-- Select All row -->
-      <label class="select-all-row">
-        <input
-          type="checkbox"
-          :checked="allSelected"
-          @change="toggleSelectAll"
-        />
-        <span v-if="allSelected">Deselect All</span>
-        <span v-else>Select All ({{ filtered.length }})</span>
-      </label>
+    <!-- Call controls — only on /calls page -->
+    <div v-if="isCallsPage" class="sidebar-actions">
+      <button class="btn-new" @click="router.push('/calls/new')">+ New Call</button>
+      <select v-model="callStatusFilter" class="status-filter">
+        <option v-for="opt in callStatusOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+      </select>
+      <input v-model="callSearch" type="search" placeholder="Search ref or buyer..." class="search-input" />
+    </div>
+
+    <!-- Call list — only on /calls page -->
+    <div v-if="isCallsPage" class="call-list">
+      <div v-if="filteredCalls.length" class="shipment-list">
+        <div
+          v-for="c in filteredCalls"
+          :key="c.id"
+          class="shipment-row"
+          :class="{ active: String(c.id) === route.params.id }"
+          @click="router.push(`/calls/${c.id}`)"
+        >
+          <div class="row-main">
+            <span class="ref">{{ c.call_ref }}</span>
+            <StatusBadge :label="c.status" size="sm" />
+          </div>
+          <div class="row-sub">{{ c.buyer_name }}</div>
+        </div>
+      </div>
+      <div v-else class="empty-mini">{{ callSearch || callStatusFilter ? 'No calls match filters' : 'No calls' }}</div>
+    </div>
+
+    <!-- Shipment list — hidden on /calls page -->
+    <template v-if="!isCallsPage">
+      <div v-if="filtered.length" class="shipment-list">
+        <!-- Select All row -->
+        <label class="select-all-row">
+          <input
+            type="checkbox"
+            :checked="allSelected"
+            @change="toggleSelectAll"
+          />
+          <span v-if="allSelected">Deselect All</span>
+          <span v-else>Select All ({{ filtered.length }})</span>
+        </label>
 
       <div
         v-for="s in filtered"
@@ -175,7 +239,7 @@ async function handleBatchApply() {
             @click.prevent="goDetail(s.id, $event)"
             :title="`View details for ${s.shipment_ref}`"
             @dblclick.stop
-          >{{ s.shipment_ref }}</a>
+          >{{ s.booking_number ?? '—' }}</a>
           <StatusBadge :label="s.status" size="sm" />
           <button
             v-if="auth.isAdmin"
@@ -210,6 +274,7 @@ async function handleBatchApply() {
         @click="store.goToPage(store.currentPage + 1)"
       >Next →</button>
     </div>
+    </template>
   </aside>
 </template>
 
@@ -329,6 +394,12 @@ async function handleBatchApply() {
 }
 .batch-apply-btn:hover { opacity: 0.9; }
 .batch-apply-btn:disabled { opacity: 0.5; }
+
+/* Call list — reuses shipment-row pattern from below */
+/* ponytail: must grow + scroll like .shipment-list; min-height:0 lets a flex
+   child shrink below content so it scrolls inside the fixed-height sidebar */
+.call-list { flex: 1; overflow-y: auto; min-height: 0; }
+.empty-mini { text-align: center; padding: var(--space-md); color: var(--text-sidebar-muted); font-size: var(--text-xs); }
 
 /* Select all */
 .select-all-row {

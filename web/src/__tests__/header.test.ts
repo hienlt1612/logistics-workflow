@@ -52,9 +52,9 @@ describe('AppHeader', () => {
 
     const links = wrapper.findAll('a');
     const linkTexts = links.map(l => l.text());
-    expect(linkTexts).toContain('Dashboard');
-    expect(linkTexts).toContain('Workflow');
-    expect(linkTexts).toContain('Export');
+    expect(linkTexts).toContain('📊 Dashboard');
+    expect(linkTexts).toContain('🚢 Shipping Calls');
+    expect(linkTexts).toContain('📋 Shipments');
   });
 
   it('renders logout button', () => {

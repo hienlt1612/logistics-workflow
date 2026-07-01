@@ -51,6 +51,7 @@ async fn test_create_and_verify_shipment() {
         origin_port: Some("Test Port".into()),
         warehouse_loc: Some("Test Warehouse".into()),
         loading_plan: Some("Test cargo plan".into()),
+        shipping_call_id: None,
     };
 
     let created = db::queries::create_shipment(&pool, &input)

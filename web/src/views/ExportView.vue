@@ -30,10 +30,11 @@ async function handleExport() {
         {{ store.shipments.length }} shipments ready for export
       </p>
       <button class="export-btn" :disabled="exporting" @click="handleExport">
-        {{ exporting ? 'Generating...' : '📥 Download Workbook1 Excel' }}
+        {{ exporting ? 'Generating...' : '📥 Download Business Process Report' }}
       </button>
       <p class="export-hint">
-        Exports all shipments in the 30-column workbook1 format with role-grouped headers.
+        Full business-process report — Shipping Calls with their Shipments in a
+        Pivot View, a flat Shipments detail sheet, and a Summary sheet.
       </p>
     </div>
   </div>

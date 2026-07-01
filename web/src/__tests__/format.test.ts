@@ -33,11 +33,11 @@ describe('Format Utilities', () => {
   });
 
   describe('fmtCurrency', () => {
-    it('formats to 2 decimal places', () => {
-      expect(fmtCurrency('8888.5')).toBe('8888.50');
+    it('formats with VN locale (comma decimal, dot thousands)', () => {
+      expect(fmtCurrency('8888.5')).toBe('8.888,50');
     });
-    it('handles integer string', () => {
-      expect(fmtCurrency('5000')).toBe('5000.00');
+    it('formats integer with VN locale', () => {
+      expect(fmtCurrency('5000')).toBe('5.000,00');
     });
     it('returns empty for null', () => {
       expect(fmtCurrency(null)).toBe('');

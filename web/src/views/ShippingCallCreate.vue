@@ -39,6 +39,11 @@ async function handleSubmit() {
     error.value = 'Buyer and Incoterms are required';
     return;
   }
+  const whSum = warehouses.value.reduce((s, w) => s + w.planned_containers, 0);
+  if (whSum > form.value.total_containers) {
+    error.value = `Warehouse total (${whSum}) exceeds planned containers (${form.value.total_containers})`;
+    return;
+  }
   saving.value = true;
   error.value = '';
   const result = await store.create({

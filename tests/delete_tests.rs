@@ -17,6 +17,7 @@ async fn test_delete_existing_shipment() {
         origin_port: None,
         warehouse_loc: None,
         loading_plan: None,
+        shipping_call_id: None,
     };
     let created = db::queries::create_shipment(&pool, &input)
         .await

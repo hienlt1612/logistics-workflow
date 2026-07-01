@@ -1,15 +1,16 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue';
-import type { Shipment } from '@/api/client';
+import { ref, watch, computed, onMounted } from 'vue';
+import type { Shipment, ShippingCall } from '@/api/client';
 import { useShipmentsStore } from '@/stores/shipments';
+import * as api from '@/api/client';
 
 const store = useShipmentsStore();
 const emit = defineEmits<{ saved: [] }>();
 
+const openCalls = ref<ShippingCall[]>([]);
+const selectedCallId = ref<number | null>(null);
+
 const form = ref({
-  sc_po_id: '',
-  sc_po_date: '',
-  sc_po_by: '',
   buyer_name: '',
   booking_number: '',
   shipping_line: '',
@@ -21,14 +22,24 @@ const form = ref({
 const saving = ref(false);
 const isReadOnly = computed(() => store.selected?.telex_released ?? false);
 
+onMounted(async () => {
+  try {
+    const calls = (await api.fetchShippingCalls()).filter(c => c.status === 'OPEN');
+    // ponytail: include the selected shipment's call (may be ON_LOADING, not in
+    // OPEN list) here so this assignment can't clobber the watch's added call.
+    const cid = store.selected?.shipping_call_id;
+    if (cid && !calls.find(c => c.id === cid)) {
+      try { calls.push(await api.fetchShippingCall(cid)); } catch { /* silent */ }
+    }
+    openCalls.value = calls;
+  } catch { /* silent */ }
+});
+
 watch(
   () => store.selected,
   (s: Shipment | null) => {
     if (s) {
       form.value = {
-        sc_po_id: s.sc_po_id ?? '',
-        sc_po_date: s.sc_po_date ?? '',
-        sc_po_by: s.sc_po_by ?? '',
         buyer_name: s.buyer_name ?? '',
         booking_number: s.booking_number ?? '',
         shipping_line: s.shipping_line ?? '',
@@ -36,20 +47,38 @@ watch(
         warehouse_loc: s.warehouse_loc ?? '',
         loading_plan: s.loading_plan ?? '',
       };
+      selectedCallId.value = s.shipping_call_id ?? null;
+      // ponytail: selected call may be ON_LOADING (not in OPEN-only list), add it
+      if (s.shipping_call_id && !openCalls.value.find(c => c.id === s.shipping_call_id)) {
+        void (async () => {
+          try { const c = await api.fetchShippingCall(s.shipping_call_id!); openCalls.value.unshift(c); }
+          catch { /* silent */ }
+        })();
+      }
     }
   },
   { immediate: true }
 );
 
+// ponytail: auto-fill buyer from selected shipping call
+watch(selectedCallId, (id) => {
+  const call = openCalls.value.find(c => c.id === id);
+  if (call) form.value.buyer_name = call.buyer_name;
+});
+
 function validate(): boolean {
   const t = (v: unknown) => String(v ?? '').trim();
-  const req = ['sc_po_id', 'buyer_name', 'booking_number', 'shipping_line', 'origin_port'];
+  const req = ['buyer_name', 'booking_number', 'shipping_line', 'origin_port'];
   for (const key of req) {
     const val = (form.value as unknown as Record<string, unknown>)[key];
     if (!t(val)) {
       store.lastToast = { text: `${key.replace(/_/g, ' ').toUpperCase()} is required`, type: 'error' };
       return false;
     }
+  }
+  if (!selectedCallId.value) {
+    store.lastToast = { text: 'Please select a Shipping Call', type: 'error' };
+    return false;
   }
   return true;
 }
@@ -58,7 +87,8 @@ async function handleSave() {
   if (!store.selectedId) return;
   if (!validate()) return;
   saving.value = true;
-  const result = await store.updateCurrent({ ...form.value, status: 'DOCUMENTS_READY' });
+  const payload: any = { ...form.value, shipping_call_id: selectedCallId.value, status: 'DOCUMENTS_READY' };
+  const result = await store.updateCurrent(payload);
   saving.value = false;
   if (result) emit('saved');
 }
@@ -73,19 +103,14 @@ async function handleSave() {
     </div>
 
     <div class="form-grid">
-      <label class="field">
-        SC/PO ID <span class="required">*</span>
-        <input v-model="form.sc_po_id" required placeholder="e.g. SC-2026-001" :disabled="isReadOnly" />
-      </label>
-
-      <label class="field">
-        Date of SC/PO
-        <input v-model="form.sc_po_date" type="date" :disabled="isReadOnly" />
-      </label>
-
-      <label class="field">
-        Made By
-        <input v-model="form.sc_po_by" placeholder="e.g. Minh" :disabled="isReadOnly" />
+      <label class="field full-width">
+        Shipping Call <span class="required">*</span>
+        <select v-model.number="selectedCallId" :disabled="isReadOnly">
+          <option :value="null">— Select Shipping Call —</option>
+          <option v-for="c in openCalls" :key="c.id" :value="c.id">
+            {{ c.call_ref }} — {{ c.buyer_name }} ({{ c.total_containers }} containers)
+          </option>
+        </select>
       </label>
 
       <label class="field">
@@ -151,14 +176,15 @@ async function handleSave() {
   display: flex; flex-direction: column; gap: var(--space-xs);
   font-size: var(--text-sm); font-weight: 500; color: var(--text-secondary);
 }
-.field input, .field textarea {
+.field input, .field textarea, .field select {
   padding: var(--space-sm); border: 1px solid var(--border-color);
   border-radius: var(--radius-sm); font-size: var(--text-base); color: var(--text-primary);
+  background: var(--bg-card);
 }
-.field input:focus, .field textarea:focus {
+.field input:focus, .field textarea:focus, .field select:focus {
   outline: none; border-color: var(--color-admin);
 }
-.field input:disabled, .field textarea:disabled { opacity: 0.6; background: var(--border-light); cursor: not-allowed; }
+.field input:disabled, .field textarea:disabled, .field select:disabled { opacity: 0.6; background: var(--border-light); cursor: not-allowed; }
 .required { color: var(--color-admin); }
 .full-width { grid-column: 1 / -1; }
 .form-actions {

@@ -1,21 +1,52 @@
 <script setup lang="ts">
-import { onMounted, computed } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { onMounted, ref, computed, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import { useShipmentsStore } from '@/stores/shipments';
 import type { Shipment } from '@/api/client';
+import * as api from '@/api/client';
 import { fmtDateDisplay, fmtCurrency } from '@/utils/format';
 import StatusBadge from '@/components/shared/StatusBadge.vue';
 
 const route = useRoute();
-const router = useRouter();
 const store = useShipmentsStore();
 
 const id = computed(() => Number(route.params.id));
+const containerCount = ref(0);
+const callTotal = ref(0);
+const callRef = ref('');
 
 onMounted(async () => {
   await store.loadAll();
-  store.select(id.value);
+  await ensureSelected();
+  await loadExtras();
 });
+
+// ponytail: re-trigger on route change (same component)
+watch(id, async () => {
+  await ensureSelected();
+  await loadExtras();
+});
+
+// ponytail: the paginated list may not hold this shipment (older non-telex ones
+// fall past page 1). Fetch it directly and add to the store so `selected` resolves.
+async function ensureSelected() {
+  if (!store.shipments.find((s) => s.id === id.value)) {
+    try { store.shipments.push(await api.fetchShipment(id.value)); } catch { /* not found */ }
+  }
+  store.select(id.value);
+}
+
+async function loadExtras() {
+  try { containerCount.value = (await api.fetchContainers(id.value)).length; } catch { containerCount.value = 0; }
+  const callId = store.selected?.shipping_call_id;
+  if (callId) {
+    try {
+      const c = await api.fetchShippingCall(callId);
+      callTotal.value = c.total_containers;
+      callRef.value = c.call_ref;
+    } catch { callTotal.value = 0; }
+  }
+}
 
 function fmtDate(v: string | null): string {
   return fmtDateDisplay(v);
@@ -28,16 +59,10 @@ function fmtBool(v: boolean): string {
 function fmtVal(v: string | null): string {
   return fmtCurrency(v);
 }
-
-function back() {
-  router.push('/workflow');
-}
 </script>
 
 <template>
   <div class="detail-view">
-    <button class="back-btn" @click="back">← Back to Workflow</button>
-
     <div v-if="store.loading" class="loading">Loading...</div>
 
     <template v-else-if="store.selected">
@@ -47,8 +72,15 @@ function back() {
           <div class="header-left">
             <h1>{{ store.selected.shipment_ref }}</h1>
             <StatusBadge :label="store.selected.status" size="md" />
+            <router-link :to="`/workflow/${store.selected.id}`" class="edit-btn">✎ Edit</router-link>
           </div>
           <div class="header-right">
+            <span v-if="callRef" class="meta">
+              🚢
+              <router-link :to="`/calls/${store.selected?.shipping_call_id}`" class="call-link">
+                {{ callRef }}
+              </router-link>
+            </span>
             <span class="meta">Created: {{ fmtDate(store.selected.created_at) }}</span>
             <span class="meta">Updated: {{ fmtDate(store.selected.updated_at) }}</span>
           </div>
@@ -105,6 +137,13 @@ function back() {
                 <span v-else>—</span>
               </span>
             </div>
+          </div>
+          <!-- Containers -->
+          <div class="check-group">
+            <h3 style="color: var(--color-manager)">CONTAINERS LOADED</h3>
+            <span class="val">{{ containerCount }} / {{ callTotal }} loaded
+              <span v-if="store.selected?.containers_loaded" style="color: var(--color-checklist); font-weight: 700;">✓</span>
+            </span>
           </div>
         </section>
 
@@ -187,20 +226,16 @@ function back() {
   margin: 0 auto;
 }
 
-.back-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-xs);
-  background: none;
-  border: none;
-  color: var(--color-manager);
+.edit-btn {
+  background: var(--color-manager);
+  color: var(--text-inverse);
+  text-decoration: none;
   font-size: var(--text-sm);
   font-weight: 600;
-  cursor: pointer;
-  padding: var(--space-xs) 0;
-  margin-bottom: var(--space-lg);
+  padding: var(--space-xs) var(--space-md);
+  border-radius: var(--radius-sm);
 }
-.back-btn:hover { text-decoration: underline; }
+.edit-btn:hover { opacity: 0.9; }
 
 .loading {
   text-align: center;
@@ -243,6 +278,12 @@ function back() {
   font-size: var(--text-xs);
   color: var(--text-secondary);
 }
+.call-link {
+  color: var(--color-manager);
+  font-weight: 600;
+  text-decoration: none;
+}
+.call-link:hover { text-decoration: underline; }
 
 /* Phase sections */
 .phase {
