@@ -1157,16 +1157,24 @@ async fn handle_create_container(pool: &sqlx::PgPool, body: &str) -> (&'static s
         Ok(v) => v,
         Err(e) => return ("400 Bad Request", "application/json", json_error("VALIDATION_ERROR", &format!("Invalid JSON: {e}"))),
     };
-    // ponytail: capacity check — reject if warehouse at planned max
-    if let Some(ref wh) = input.warehouse_name {
-        if let Ok(Some(shipment)) = db::queries::get_shipment(pool, input.shipment_id).await {
-            if let Some(call_id) = shipment.shipping_call_id {
-                match db::queries::check_warehouse_capacity(pool, call_id, wh).await {
-                    Ok((planned, loaded)) if loaded >= planned => {
+    // ponytail: capacity checks — global (per call total) then per-warehouse
+    if let Ok(Some(shipment)) = db::queries::get_shipment(pool, input.shipment_id).await {
+        if let Some(call_id) = shipment.shipping_call_id {
+            // global cap: total containers across the call must stay ≤ call.total_containers
+            if let Ok(Some(call)) = db::queries::get_shipping_call(pool, call_id).await {
+                let loaded = db::queries::count_containers_by_call(pool, call_id).await.unwrap_or(0);
+                if loaded >= call.total_containers as i64 {
+                    return ("409 Conflict", "application/json", json_error("CAPACITY_EXCEEDED",
+                        &format!("Call at capacity: {loaded}/{} containers loaded", call.total_containers)));
+                }
+            }
+            // per-warehouse cap
+            if let Some(ref wh) = input.warehouse_name {
+                if let Ok((planned, loaded)) = db::queries::check_warehouse_capacity(pool, call_id, wh).await {
+                    if loaded >= planned {
                         return ("409 Conflict", "application/json", json_error("CAPACITY_EXCEEDED",
                             &format!("Warehouse '{wh}' at capacity: {loaded}/{planned} containers loaded")));
                     }
-                    _ => {} // warehouse not in plan → allow (unplanned), or DB error → let insert fail
                 }
             }
         }

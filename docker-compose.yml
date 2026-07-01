@@ -12,7 +12,7 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD:-change-me-in-production}
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./db-backup:/docker-entrypoint-initdb.d:ro   # auto-restore on first run
+      - ./db-backup/seed.sql:/docker-entrypoint-initdb.d/seed.sql:ro   # auto-restore on first run
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-lw_user} -d ${DB_NAME:-logistics_workflow}"]
       interval: 10s
@@ -60,11 +60,22 @@ services:
       - api
     ports:
       - "${PORT:-80}:80"
+      - "443:443"
     volumes:
       - ./web/dist:/usr/share/nginx/html:ro
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./${NGINX_CONF:-nginx.conf}:/etc/nginx/conf.d/default.conf:ro
+      - ./certbot/conf:/etc/letsencrypt:ro
+      - ./certbot/www:/var/www/certbot:ro
     networks:
       - lw-net
+
+  # ── Certbot (Let's Encrypt) — run on demand via `deploy.sh ssl <domain>` ──
+  certbot:
+    image: certbot/certbot
+    profiles: ["ssl"]
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
 
 volumes:
   pgdata:

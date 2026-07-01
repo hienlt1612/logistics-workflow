@@ -34,6 +34,7 @@ Commands:
   status      Show service status
   db-dump     Export database to ./db-backup/
   db-restore  Restore database from ./db-backup/
+  ssl         Enable HTTPS via Let's Encrypt: ./deploy.sh ssl <domain> [email]
   clean       Stop and remove everything (volumes too!)
   help        Show this message
 
@@ -172,6 +173,34 @@ cmd_db_restore() {
     log "Database restored."
 }
 
+# ── HTTPS via Let's Encrypt (webroot, no downtime) ──────────
+cmd_ssl() {
+    check_deps
+    local domain="${1:-}" email="${2:-}"
+    [ -n "$domain" ] || err "Usage: ./deploy.sh ssl <domain> [email]"
+    email="${email:-admin@${domain}}"
+    mkdir -p certbot/www certbot/conf
+
+    info "Ensuring nginx is up on :80 for the ACME challenge..."
+    $(compose_cmd) up -d nginx
+
+    info "Requesting certificate for ${domain} (email: ${email})..."
+    $(compose_cmd) run --rm certbot certonly --webroot -w /var/www/certbot \
+        -d "$domain" --email "$email" --agree-tos --no-eff-email --non-interactive \
+        || err "certbot failed — check DNS points $domain → this VPS and port 80 is open."
+
+    info "Activating TLS nginx config..."
+    sed "s/DOMAIN/${domain}/g" nginx-ssl.conf.template > nginx.ssl.active.conf
+    if grep -q '^NGINX_CONF=' .env 2>/dev/null; then
+        sed -i "s|^NGINX_CONF=.*|NGINX_CONF=nginx.ssl.active.conf|" .env
+    else
+        echo "NGINX_CONF=nginx.ssl.active.conf" >> .env
+    fi
+    $(compose_cmd) up -d nginx
+    log "HTTPS enabled → https://${domain}"
+    warn "Renewal: add to crontab → 0 3 * * * cd $SCRIPT_DIR && \$(compose_cmd) run --rm certbot renew && \$(compose_cmd) restart nginx"
+}
+
 cmd_clean() {
     check_deps
     warn "This will remove ALL containers, volumes, and data!"
@@ -196,6 +225,7 @@ case "${1:-help}" in
     status)      cmd_status ;;
     db-dump)     cmd_db_dump ;;
     db-restore)  cmd_db_restore "${2:-}" ;;
+    ssl)         cmd_ssl "${2:-}" "${3:-}" ;;
     clean)       cmd_clean ;;
     help|--help|-h) usage ;;
     *)           usage; exit 1 ;;

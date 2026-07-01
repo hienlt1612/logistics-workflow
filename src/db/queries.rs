@@ -125,6 +125,15 @@ pub async fn count_containers_by_shipment(
     Ok(rows.into_iter().collect())
 }
 
+// ponytail: total containers loaded across all shipments of a call (for global cap)
+pub async fn count_containers_by_call(pool: &PgPool, call_id: i64) -> Result<i64, sqlx::Error> {
+    let (n,): (i64,) = sqlx::query_as(
+        "SELECT COUNT(*)::int8 FROM containers c \
+         JOIN shipments s ON s.id = c.shipment_id WHERE s.shipping_call_id = $1",
+    ).bind(call_id).fetch_one(pool).await?;
+    Ok(n)
+}
+
 pub async fn list_shipments_paginated(
     pool: &PgPool, status_filter: Option<&str>, page: i64, page_size: i64,
 ) -> Result<(Vec<Shipment>, i64), sqlx::Error> {

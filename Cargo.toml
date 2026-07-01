@@ -1,6 +1,6 @@
 [package]
 name = "logistics-workflow"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 description = "Logistics workflow — web UI + optional Qt6 desktop"
 authors = ["Bright Ng"]
