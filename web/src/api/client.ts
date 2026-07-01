@@ -61,6 +61,7 @@ export interface Shipment {
   originals_description: string | null;
   telex_released: boolean;
   payment_received: boolean;
+  shipping_call_id: number | null;
 }
 
 export interface DashboardStats {
@@ -211,4 +212,88 @@ export async function downloadExcel(): Promise<void> {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+// ── Shipping Calls ──
+// ponytail: reuse request() wrapper from shipments.
+
+export interface ShippingCall {
+  id: number;
+  call_ref: string;
+  sc_po_id: string | null;
+  sc_po_date: string | null;
+  sc_po_by: string | null;
+  buyer_name: string;
+  incoterms: string;
+  product_description: string | null;
+  total_containers: number;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CallWarehouse {
+  id: number;
+  shipping_call_id: number;
+  warehouse_name: string;
+  planned_containers: number;
+  loaded_containers: number;
+  status: string;
+  notes: string | null;
+}
+
+export interface Container {
+  id: number;
+  shipment_id: number;
+  container_number: string;
+  seal_number: string | null;
+  warehouse_name: string | null;
+  weight_kg: string | null;
+  cbm: string | null;
+  status: string;
+  notes: string | null;
+}
+
+export interface CreateShippingCallInput {
+  sc_po_id?: string;
+  sc_po_date?: string;
+  sc_po_by?: string;
+  buyer_name: string;
+  incoterms: string;
+  product_description?: string;
+  total_containers: number;
+  warehouses?: { warehouse_name: string; planned_containers: number }[];
+}
+
+export interface CreateContainerInput {
+  shipment_id: number;
+  container_number: string;
+  seal_number?: string;
+  warehouse_name?: string;
+  weight_kg?: string;
+  cbm?: string;
+}
+
+export async function fetchShippingCalls(): Promise<ShippingCall[]> {
+  return request('/api/shipping-calls');
+}
+
+export async function fetchShippingCall(id: number): Promise<ShippingCall> {
+  return request(`/api/shipping-calls/${id}`);
+}
+
+export async function createShippingCall(data: CreateShippingCallInput): Promise<ShippingCall> {
+  return request('/api/shipping-calls', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function fetchCallWarehouses(callId: number): Promise<CallWarehouse[]> {
+  return request(`/api/shipping-calls/${callId}/warehouses`);
+}
+
+export async function fetchContainers(shipmentId: number): Promise<Container[]> {
+  return request(`/api/shipments/${shipmentId}/containers`);
+}
+
+export async function createContainer(data: CreateContainerInput): Promise<Container> {
+  return request('/api/containers', { method: 'POST', body: JSON.stringify(data) });
 }

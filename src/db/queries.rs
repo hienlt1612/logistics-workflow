@@ -303,3 +303,97 @@ pub async fn set_checklist_bool(pool: &PgPool, id: i64, field: &str, value: bool
     sql.push_str(" WHERE id = $2 RETURNING *");
     sqlx::query_as::<_, Shipment>(&sql).bind(value).bind(id).fetch_one(pool).await
 }
+
+// ── Shipping Calls ──
+// ponytail: reuse same query pattern as shipments.
+
+pub async fn list_shipping_calls(pool: &PgPool) -> Result<Vec<ShippingCall>, sqlx::Error> {
+    sqlx::query_as::<_, ShippingCall>("SELECT * FROM shipping_calls ORDER BY created_at DESC")
+        .fetch_all(pool).await
+}
+
+pub async fn get_shipping_call(pool: &PgPool, id: i64) -> Result<Option<ShippingCall>, sqlx::Error> {
+    sqlx::query_as::<_, ShippingCall>("SELECT * FROM shipping_calls WHERE id = $1")
+        .bind(id).fetch_optional(pool).await
+}
+
+pub async fn next_call_ref(pool: &PgPool) -> Result<String, sqlx::Error> {
+    let row: (Option<i32>,) = sqlx::query_as(
+        "SELECT MAX(CAST(SUBSTRING(call_ref FROM '[0-9]+$') AS INTEGER)) FROM shipping_calls WHERE call_ref LIKE 'CALL-%'"
+    ).fetch_one(pool).await?;
+    let next = row.0.unwrap_or(0) as i64 + 1;
+    Ok(format!("CALL-{}-{:03}", chrono::Utc::now().format("%Y"), next))
+}
+
+pub async fn create_shipping_call(pool: &PgPool, call: &CreateShippingCallInput) -> Result<ShippingCall, sqlx::Error> {
+    let ref_num = next_call_ref(pool).await?;
+    let row: (i64,) = sqlx::query_as(
+        "INSERT INTO shipping_calls (call_ref, sc_po_id, sc_po_date, sc_po_by, buyer_name, incoterms, product_description, total_containers)
+         VALUES ($1,$2,CASE WHEN $3='' THEN NULL ELSE $3::date END,$4,$5,$6,$7,$8) RETURNING id"
+    ).bind(&ref_num).bind(&call.sc_po_id).bind(&call.sc_po_date)
+     .bind(&call.sc_po_by).bind(&call.buyer_name).bind(&call.incoterms)
+     .bind(&call.product_description).bind(call.total_containers)
+     .fetch_one(pool).await?;
+    get_shipping_call(pool, row.0).await.map(|s| s.expect("just inserted"))
+}
+
+// ── Call Warehouses ──
+
+pub async fn list_call_warehouses(pool: &PgPool, call_id: i64) -> Result<Vec<CallWarehouse>, sqlx::Error> {
+    sqlx::query_as::<_, CallWarehouse>("SELECT * FROM call_warehouses WHERE shipping_call_id = $1 ORDER BY id")
+        .bind(call_id).fetch_all(pool).await
+}
+
+pub async fn create_call_warehouse(pool: &PgPool, w: &CreateWarehouseInput) -> Result<CallWarehouse, sqlx::Error> {
+    sqlx::query_as::<_, CallWarehouse>(
+        "INSERT INTO call_warehouses (shipping_call_id, warehouse_name, planned_containers) VALUES ($1,$2,$3) RETURNING *"
+    ).bind(w.shipping_call_id).bind(&w.warehouse_name).bind(w.planned_containers)
+     .fetch_one(pool).await
+}
+
+// ── Containers ──
+
+pub async fn list_containers(pool: &PgPool, shipment_id: i64) -> Result<Vec<Container>, sqlx::Error> {
+    sqlx::query_as::<_, Container>("SELECT * FROM containers WHERE shipment_id = $1 ORDER BY id")
+        .bind(shipment_id).fetch_all(pool).await
+}
+
+pub async fn create_container(pool: &PgPool, c: &CreateContainerInput) -> Result<Container, sqlx::Error> {
+    sqlx::query_as::<_, Container>(
+        "INSERT INTO containers (shipment_id, container_number, seal_number, warehouse_name, weight_kg, cbm) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *"
+    ).bind(c.shipment_id).bind(&c.container_number).bind(&c.seal_number)
+     .bind(&c.warehouse_name).bind(c.weight_kg.clone()).bind(c.cbm.clone())
+     .fetch_one(pool).await
+}
+
+// ── Input structs ──
+// ponytail: reusing existing Deserialize pattern from CreateShipmentInput.
+
+#[derive(Debug, Deserialize)]
+pub struct CreateShippingCallInput {
+    pub sc_po_id: Option<String>,
+    pub sc_po_date: Option<String>,
+    pub sc_po_by: Option<String>,
+    pub buyer_name: String,
+    pub incoterms: String,
+    pub product_description: Option<String>,
+    pub total_containers: i32,
+    pub warehouses: Option<Vec<CreateWarehouseInput>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateWarehouseInput {
+    pub shipping_call_id: i64,
+    pub warehouse_name: String,
+    pub planned_containers: i32,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateContainerInput {
+    pub shipment_id: i64,
+    pub container_number: String,
+    pub seal_number: Option<String>,
+    pub warehouse_name: Option<String>,
+    pub weight_kg: Option<BigDecimal>,
+    pub cbm: Option<BigDecimal>,
+}

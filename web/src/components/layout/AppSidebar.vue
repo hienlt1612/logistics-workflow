@@ -101,6 +101,10 @@ async function handleBatchApply() {
 
 <template>
   <aside class="sidebar">
+    <div class="sidebar-nav">
+      <router-link to="/" class="nav-link">Dashboard</router-link>
+      <router-link to="/calls" class="nav-link">Shipping Calls</router-link>
+    </div>
     <div class="sidebar-actions">
       <button class="btn-new" @click="handleNew" :disabled="store.loading">
         + New Shipment
@@ -218,6 +222,31 @@ async function handleBatchApply() {
   flex-direction: column;
   height: calc(100vh - var(--header-height));
   overflow: hidden;
+}
+
+/* Nav links */
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.nav-link {
+  color: var(--text-sidebar);
+  text-decoration: none;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-sm);
+  transition: background 0.15s;
+}
+.nav-link:hover {
+  background: var(--bg-sidebar-hover);
+}
+.nav-link.router-link-active {
+  background: var(--color-manager);
+  color: var(--text-inverse);
 }
 
 .sidebar-actions {

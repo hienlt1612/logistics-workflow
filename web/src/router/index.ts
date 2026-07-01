@@ -28,6 +28,21 @@ const router = createRouter({
       name: 'export',
       component: () => import('@/views/ExportView.vue'),
     },
+    {
+      path: '/calls',
+      name: 'calls',
+      component: () => import('@/views/ShippingCallList.vue'),
+    },
+    {
+      path: '/calls/new',
+      name: 'call-create',
+      component: () => import('@/views/ShippingCallCreate.vue'),
+    },
+    {
+      path: '/calls/:id',
+      name: 'call-detail',
+      component: () => import('@/views/ShippingCallDetail.vue'),
+    },
   ],
 });
 

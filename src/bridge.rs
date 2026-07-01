@@ -454,6 +454,53 @@ async fn route_request(raw: &str) -> (&'static str, &'static str, String) {
         return ("400 Bad Request", "application/json", json_error("BAD_REQUEST", "Invalid shipment ID"));
     }
 
+    // ── Shipping Calls ──
+    // ponytail: reuse same handler pattern as shipments.
+
+    // GET /api/shipping-calls
+    if method == "GET" && path == "/api/shipping-calls" {
+        return handle_list_calls(pool).await;
+    }
+
+    // GET /api/shipping-calls/:id
+    if method == "GET" && path.starts_with("/api/shipping-calls/") {
+        let id_str = &path["/api/shipping-calls/".len()..];
+        if let Ok(id) = id_str.parse::<i64>() {
+            return handle_get_call(pool, id).await;
+        }
+        return ("400 Bad Request", "application/json", json_error("BAD_REQUEST", "Invalid call ID"));
+    }
+
+    // POST /api/shipping-calls
+    if method == "POST" && path == "/api/shipping-calls" {
+        return handle_create_call(pool, &body).await;
+    }
+
+    // GET /api/shipping-calls/:id/warehouses
+    if method == "GET" && path.starts_with("/api/shipping-calls/") && path.ends_with("/warehouses") {
+        let rest = &path["/api/shipping-calls/".len()..];
+        let id_str = rest.trim_end_matches("/warehouses");
+        if let Ok(id) = id_str.parse::<i64>() {
+            return handle_list_call_warehouses(pool, id).await;
+        }
+        return ("400 Bad Request", "application/json", json_error("BAD_REQUEST", "Invalid call ID"));
+    }
+
+    // POST /api/containers
+    if method == "POST" && path == "/api/containers" {
+        return handle_create_container(pool, &body).await;
+    }
+
+    // GET /api/shipments/:id/containers
+    if method == "GET" && path.starts_with("/api/shipments/") && path.ends_with("/containers") {
+        let rest = &path["/api/shipments/".len()..];
+        let id_str = rest.trim_end_matches("/containers");
+        if let Ok(id) = id_str.parse::<i64>() {
+            return handle_list_containers(pool, id).await;
+        }
+        return ("400 Bad Request", "application/json", json_error("BAD_REQUEST", "Invalid shipment ID"));
+    }
+
     // PATCH /api/shipments/:id
     if method == "PATCH" && path.starts_with("/api/shipments/") {
         let id_str = &path["/api/shipments/".len()..];
@@ -762,6 +809,72 @@ QtObject {{
     let qd = qml_dir();
     let _ = fs::write(qd.join("AppData.qml"), &qml);
     let _ = fs::write(qd.join("qmldir"), "singleton AppData 1.0 AppData.qml\nsingleton Theme 1.0 Theme.qml\n");
+}
+
+// ── Shipping Call handlers ──
+// ponytail: reuse handle_* pattern from shipments.
+
+async fn handle_list_calls(pool: &sqlx::PgPool) -> (&'static str, &'static str, String) {
+    match db::queries::list_shipping_calls(pool).await {
+        Ok(calls) => ("200 OK", "application/json", serde_json::to_string(&calls).unwrap_or_default()),
+        Err(e) => ("500 Internal Server Error", "application/json", json_error("DB_ERROR", &e.to_string())),
+    }
+}
+
+async fn handle_get_call(pool: &sqlx::PgPool, id: i64) -> (&'static str, &'static str, String) {
+    match db::queries::get_shipping_call(pool, id).await {
+        Ok(Some(c)) => ("200 OK", "application/json", serde_json::to_string(&c).unwrap_or_default()),
+        Ok(None) => ("404 Not Found", "application/json", json_error("NOT_FOUND", &format!("Call {id} not found"))),
+        Err(e) => ("500 Internal Server Error", "application/json", json_error("DB_ERROR", &e.to_string())),
+    }
+}
+
+async fn handle_create_call(pool: &sqlx::PgPool, body: &str) -> (&'static str, &'static str, String) {
+    let input: db::queries::CreateShippingCallInput = match serde_json::from_str(body) {
+        Ok(v) => v,
+        Err(e) => return ("400 Bad Request", "application/json", json_error("VALIDATION_ERROR", &format!("Invalid JSON: {e}"))),
+    };
+    match db::queries::create_shipping_call(pool, &input).await {
+        Ok(call) => {
+            // ponytail: create warehouses inline if provided in same POST
+            if let Some(ref warehouses) = input.warehouses {
+                for w in warehouses {
+                    let _ = db::queries::create_call_warehouse(pool, &db::queries::CreateWarehouseInput {
+                        shipping_call_id: call.id,
+                        warehouse_name: w.warehouse_name.clone(),
+                        planned_containers: w.planned_containers,
+                    }).await;
+                }
+            }
+            ("201 Created", "application/json", serde_json::to_string(&call).unwrap_or_default())
+        }
+        Err(e) => ("500 Internal Server Error", "application/json", json_error("DB_ERROR", &e.to_string())),
+    }
+}
+
+async fn handle_list_call_warehouses(pool: &sqlx::PgPool, call_id: i64) -> (&'static str, &'static str, String) {
+    match db::queries::list_call_warehouses(pool, call_id).await {
+        Ok(warehouses) => ("200 OK", "application/json", serde_json::to_string(&warehouses).unwrap_or_default()),
+        Err(e) => ("500 Internal Server Error", "application/json", json_error("DB_ERROR", &e.to_string())),
+    }
+}
+
+async fn handle_create_container(pool: &sqlx::PgPool, body: &str) -> (&'static str, &'static str, String) {
+    let input: db::queries::CreateContainerInput = match serde_json::from_str(body) {
+        Ok(v) => v,
+        Err(e) => return ("400 Bad Request", "application/json", json_error("VALIDATION_ERROR", &format!("Invalid JSON: {e}"))),
+    };
+    match db::queries::create_container(pool, &input).await {
+        Ok(c) => ("201 Created", "application/json", serde_json::to_string(&c).unwrap_or_default()),
+        Err(e) => ("500 Internal Server Error", "application/json", json_error("DB_ERROR", &e.to_string())),
+    }
+}
+
+async fn handle_list_containers(pool: &sqlx::PgPool, shipment_id: i64) -> (&'static str, &'static str, String) {
+    match db::queries::list_containers(pool, shipment_id).await {
+        Ok(containers) => ("200 OK", "application/json", serde_json::to_string(&containers).unwrap_or_default()),
+        Err(e) => ("500 Internal Server Error", "application/json", json_error("DB_ERROR", &e.to_string())),
+    }
 }
 
 // ── JSON helpers ──
