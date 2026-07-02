@@ -2,13 +2,18 @@
 import { onMounted, computed, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useShippingCallsStore } from '@/stores/shipping-calls';
-import { useShipmentsStore } from '@/stores/shipments';
+import type { Shipment } from '@/api/client';
+import * as api from '@/api/client';
 
 const router = useRouter();
 const store = useShippingCallsStore();
-const shipStore = useShipmentsStore();
+// ponytail: full shipment list (paginated store hid booking pills for calls off page 1)
+const allShips = ref<Shipment[]>([]);
 
-onMounted(() => { store.loadAll(); shipStore.loadAll(); });
+onMounted(async () => {
+  store.loadAll();
+  allShips.value = (await api.fetchShipments({ pageSize: 1000 })).data;
+});
 
 import { fmtDateDisplay } from '@/utils/format';
 function fmtDate(iso: string): string {
@@ -30,8 +35,8 @@ const groups = computed(() => [
 
 // ponytail: map call_id → linked shipment refs
 const shipmentsByCall = computed(() => {
-  const m: Record<number, typeof shipStore.shipments> = {};
-  for (const s of shipStore.shipments) {
+  const m: Record<number, Shipment[]> = {};
+  for (const s of allShips.value) {
     if (s.shipping_call_id) (m[s.shipping_call_id] ??= []).push(s);
   }
   return m;

@@ -2,13 +2,15 @@
 import { onMounted, ref, computed, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useShippingCallsStore } from '@/stores/shipping-calls';
-import { useShipmentsStore } from '@/stores/shipments';
+import type { Shipment } from '@/api/client';
 import * as api from '@/api/client';
 
 const route = useRoute();
 const router = useRouter();
 const callStore = useShippingCallsStore();
-const shipStore = useShipmentsStore();
+// ponytail: load ALL shipments for this call locally — the paginated shipments
+// store (20/page, sticky status filter) hid linked bookings → "No bookings".
+const allShips = ref<Shipment[]>([]);
 
 const callId = computed(() => Number(route.params.id));
 const editing = ref(false);
@@ -17,10 +19,14 @@ const editWarehouses = ref<{ warehouse_name: string; planned_containers: number 
 const newWh = ref({ name: '', count: 0 });
 const saving = ref(false);
 
+async function loadShips() {
+  allShips.value = (await api.fetchShipments({ pageSize: 1000 })).data;
+}
+
 // ponytail: same-component route change — reload on callId change
 async function loadCallDetail() {
   await callStore.loadOne(callId.value);
-  await shipStore.loadAll();
+  await loadShips();
   for (const s of callShipments.value) await loadContainers(s.id);
 }
 
@@ -92,7 +98,7 @@ async function saveEdit() {
 }
 
 const callShipments = computed(() =>
-  shipStore.shipments.filter(s => s.shipping_call_id == callId.value)
+  allShips.value.filter(s => s.shipping_call_id == callId.value)
 );
 
 // ── Container add per booking ──
@@ -162,7 +168,7 @@ async function saveEditCtn(shipmentId: number) {
 
 async function toggleLoaded(shipmentId: number, value: boolean) {
   await api.toggleChecklist(shipmentId, 'containers_loaded', value);
-  await shipStore.loadAll();
+  await loadShips();
   await loadContainers(shipmentId);
 }
 

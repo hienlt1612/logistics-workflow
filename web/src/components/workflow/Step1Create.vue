@@ -24,7 +24,10 @@ const isReadOnly = computed(() => store.selected?.telex_released ?? false);
 
 onMounted(async () => {
   try {
-    const calls = (await api.fetchShippingCalls()).filter(c => c.status === 'OPEN');
+    // ponytail: 1 call ↔ N shipments — show OPEN + ON_LOADING (accepting bookings),
+    // exclude only CLOSED (finished). Filtering to OPEN-only blocked adding more
+    // shipments once a call flipped to ON_LOADING.
+    const calls = (await api.fetchShippingCalls()).filter(c => c.status !== 'CLOSED');
     // ponytail: include the selected shipment's call (may be ON_LOADING, not in
     // OPEN list) here so this assignment can't clobber the watch's added call.
     const cid = store.selected?.shipping_call_id;

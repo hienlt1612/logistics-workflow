@@ -418,12 +418,6 @@ fn write_shipments_sheet(
 }
 
 
-fn dirs_documents() -> PathBuf {
-    std::env::var("HOME")
-        .map(|h| PathBuf::from(h).join("Documents"))
-        .unwrap_or_else(|_| PathBuf::from("/tmp"))
-}
-
 /// Get the qml directory path.
 fn qml_dir() -> PathBuf {
     std::env::current_dir()
